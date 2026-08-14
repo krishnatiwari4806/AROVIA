@@ -10,7 +10,7 @@ AROVIA is built incrementally as a high-security, full-stack AI interview evalua
 - Integer phases (1, 2, 3): Planned milestone work
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 1: Core Foundation & Database Architecture** - FastAPI server setup, PostgreSQL async SQLAlchemy models, Alembic migrations, and testing baseline.
+- [x] **Phase 1: Core Foundation & Database Architecture** - FastAPI server setup, PostgreSQL async SQLAlchemy models, Alembic migrations, and testing baseline.
 - [ ] **Phase 2: Authentication & Profile Management** - Secure user registration, bcrypt password hashing, JWT token issuance, and candidate profile management.
 - [ ] **Phase 3: Resume Ingestion & Analysis Engine** - Secure PDF/DOCX upload, magic byte verification, text extraction, and Gemini structured skill parsing.
 - [ ] **Phase 4: Interview Setup & Role Configuration** - Target role selection, seniority configuration, custom job description parsing, and session initialization.
@@ -36,8 +36,8 @@ AROVIA is built incrementally as a high-security, full-stack AI interview evalua
 **Plans**: 2 plans
 
 Plans:
-- [ ] 01-01: Backend project setup, Pydantic settings, async database session, and health check endpoint.
-- [ ] 01-02: SQLAlchemy base models, Alembic migration configuration, and automated test harness.
+- [x] 01-01: Backend project setup, Pydantic settings, async database session, and health check endpoint.
+- [x] 01-02: SQLAlchemy base models, Alembic migration configuration, and automated test harness.
 
 ---
 

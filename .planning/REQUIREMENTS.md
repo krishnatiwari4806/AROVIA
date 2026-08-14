@@ -135,11 +135,11 @@ Which phases cover which requirements. Populated during roadmap creation.
 | HIST-01 | Phase 8 | Pending |
 | HIST-02 | Phase 8 | Pending |
 | HIST-03 | Phase 8 | Pending |
-| SECR-01 | Phase 1 & Phase 9 | Pending |
+| SECR-01 | Phase 1 & Phase 9 | Complete (Phase 1) |
 | SECR-02 | Phase 2 & Phase 9 | Pending |
 | SECR-03 | Phase 9 | Pending |
-| SECR-04 | Phase 1 | Pending |
-| SECR-05 | Phase 1 & Phase 9 | Pending |
+| SECR-04 | Phase 1 | Complete |
+| SECR-05 | Phase 1 & Phase 9 | Complete (Phase 1) |
 
 **Coverage:**
 - v1 requirements: 37 total
