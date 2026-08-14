@@ -1,9 +1,9 @@
 ---
 phase: 1
 slug: core-foundation-database-architecture
-status: draft
+status: complete
 nyquist_compliant: true
-wave_0_complete: false
+wave_0_complete: true
 created: 2026-08-15
 ---
 
@@ -17,18 +17,18 @@ created: 2026-08-15
 
 | Property | Value |
 |----------|-------|
-| **Framework** | pytest 8.x + pytest-asyncio 0.23+ |
+| **Framework** | pytest 9.x + pytest-asyncio 1.4+ |
 | **Config file** | `backend/pytest.ini` |
-| **Quick run command** | `pytest tests/ -k "test_config or test_health" -v` |
-| **Full suite command** | `pytest tests/ -v` |
-| **Estimated runtime** | ~2-3 seconds |
+| **Quick run command** | `python -m pytest backend/tests/ -k "test_config or test_health" -v` |
+| **Full suite command** | `python -m pytest backend/tests/ -v` |
+| **Estimated runtime** | ~0.15 seconds |
 
 ---
 
 ## Sampling Rate
 
-- **After every task commit:** Run `pytest tests/ -v`
-- **After every plan wave:** Run `pytest tests/ -v`
+- **After every task commit:** Run `python -m pytest backend/tests/ -v`
+- **After every plan wave:** Run `python -m pytest backend/tests/ -v`
 - **Before `/gsd-verify-work`:** Full suite must be green
 - **Max feedback latency:** 5 seconds
 
@@ -38,10 +38,10 @@ created: 2026-08-15
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 01-01-01 | 01 | 1 | SECR-04 | T-01-01 | Settings fail fast if secrets missing; no hardcoded credentials | unit | `pytest tests/test_config.py -v` | ❌ W0 | ⬜ pending |
-| 01-01-02 | 01 | 1 | SECR-01 | T-01-02 | Health endpoint validates DB connection and returns typed schema | integration | `pytest tests/test_health.py -k test_health_check -v` | ❌ W0 | ⬜ pending |
-| 01-02-01 | 02 | 2 | SECR-01 | T-01-03 | Base ORM models with timestamp mixins and async session lifecycle | unit | `pytest tests/test_models.py -v` | ❌ W0 | ⬜ pending |
-| 01-02-02 | 02 | 2 | SECR-05 | T-01-04 | Global exception handler catches 500s and masks internal stack traces | integration | `pytest tests/test_health.py -k test_exception_handler -v` | ❌ W0 | ⬜ pending |
+| 01-01-01 | 01 | 1 | SECR-04 | T-01-01 | Settings fail fast if secrets missing; no hardcoded credentials | unit | `python -m pytest backend/tests/test_config.py -v` | ✅ | ✅ green |
+| 01-01-02 | 01 | 1 | SECR-01 | T-01-02 | Health endpoint validates DB connection and returns typed schema | integration | `python -m pytest backend/tests/test_health.py -k test_health_check -v` | ✅ | ✅ green |
+| 01-02-01 | 02 | 2 | SECR-01 | T-01-03 | Base ORM models with timestamp mixins and async session lifecycle | unit | `python -m pytest backend/tests/test_models.py -v` | ✅ | ✅ green |
+| 01-02-02 | 02 | 2 | SECR-05 | T-01-04 | Global exception handler catches 500s and masks internal stack traces | integration | `python -m pytest backend/tests/test_health.py -k test_global_exception_handler -v` | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -49,9 +49,9 @@ created: 2026-08-15
 
 ## Wave 0 Requirements
 
-- [ ] `backend/requirements.txt` & `backend/requirements-dev.txt` — dependencies installed
-- [ ] `backend/pytest.ini` — async configuration (`asyncio_mode = auto`)
-- [ ] `backend/tests/conftest.py` — in-memory SQLite (`aiosqlite`) test fixtures and `httpx.AsyncClient`
+- [x] `backend/requirements.txt` & `backend/requirements-dev.txt` — dependencies installed
+- [x] `backend/pytest.ini` — async configuration (`asyncio_mode = auto`)
+- [x] `backend/tests/conftest.py` — in-memory SQLite (`aiosqlite`) test fixtures and `httpx.AsyncClient`
 
 ---
 
