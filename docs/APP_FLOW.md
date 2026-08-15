@@ -1,6 +1,6 @@
 # AROVIA — Complete App Flow & User Journey Document
 
-**Version:** 1.0.0  
+**Version:** 1.1.0  
 **Date:** 2026-08-16  
 **Status:** Approved Documentation Baseline  
 **Scope:** Candidate Self-Practice & Evaluation Platform (45-Day MVP)  
@@ -19,7 +19,7 @@ This document defines the complete end-to-end user experience, state transitions
 2. [Flow 1: Landing & Public Discovery](#flow-1-landing--public-discovery)
 3. [Flow 2: Candidate Signup & Registration](#flow-2-candidate-signup--registration)
 4. [Flow 3: Authentication & Login](#flow-3-authentication--login)
-5. [Flow 4: Password Reset & Recovery](#flow-4-password-reset--recovery)
+5. [Flow 4: Password Reset & Recovery (Production & Local Dev)](#flow-4-password-reset--recovery-production--local-dev)
 6. [Flow 5: Candidate Profile Setup & Onboarding](#flow-5-candidate-profile-setup--onboarding)
 7. [Flow 6: Candidate Dashboard](#flow-6-candidate-dashboard)
 8. [Flow 7: Resume Upload, Inspection & Management](#flow-7-resume-upload-inspection--management)
@@ -46,7 +46,7 @@ flowchart TD
 
     C -->|Register: Email+Pass or Google| D[Account Created & Auth Issued]
     C -->|Login: Email+Pass or Google| E[Dashboard /dashboard]
-    C -->|Forgot Password| F[Password Reset Flow]
+    C -->|Forgot Password| F[Password Reset Flow - Dev Console / Prod Email]
     F --> C
 
     D --> G[Onboarding Profile Setup /profile]
@@ -63,24 +63,26 @@ flowchart TD
     I -->|Select Role, Seniority, Focus, JD| M[Initialize Session POST /api/v1/interviews]
     M --> N[Live Interview Room /interview/live/:sessionId]
 
-    subgraph "Live Interview Loop (6-8 Turns)"
+    subgraph "Live Interview Loop (6 Core Questions + Additional Follow-ups, Hard Cap 9 Turns)"
         N --> O[AI Question Rendered + Audio TTS]
         O --> P[Candidate Answers via STT / Typing]
         P --> Q[Review / Edit Text Response]
         Q --> R[Submit Answer POST /submit-turn]
-        R --> S{Need Follow-up?}
-        S -->|Yes| T[Targeted Follow-up Question]
+        R --> S{Need Follow-up on Core Question?}
+        S -->|Yes & Total Turns < 9| T[Additional Follow-up Question]
         T --> P
-        S -->|No / All Turns Done| U[Complete Interview POST /complete]
+        S -->|No / Turn Cap Reached / 6 Core Done| U{Completion Condition Met?}
+        U -->|No: Next Core Question| O
+        U -->|Yes: All 6 Core Complete or Cap Reached| V[Complete Interview POST /complete]
     end
 
-    U --> V[Asynchronous Evaluation Polling /interview/evaluating/:sessionId]
-    V -->|Status == 'completed'| W[Final Performance Report Card /reports/:sessionId]
+    V --> W[Asynchronous Evaluation Polling /interview/evaluating/:sessionId]
+    W -->|Status == 'completed'| X[Final Performance Report Card /reports/:sessionId]
 
-    W --> X[Interact with Radar Chart & Dimensional Scores]
-    W --> Y[Inspect Benchmark Ideal Answers]
-    W --> Z[Export Downloadable PDF Summary]
-    W --> E
+    X --> Y[Interact with Radar Chart & Dimensional Scores]
+    X --> Z[Inspect Benchmark Ideal Answers]
+    X --> AA[Export Downloadable PDF Summary]
+    X --> E
 ```
 
 ---
@@ -205,17 +207,56 @@ flowchart TD
     IssueTokens --> RedirectDashboard[Redirect to /dashboard]
 ```
 
-### 3.2 Flow Details
+### 3.2 Google Sign-In Account Collision UX & Flow
+When a candidate attempts Google Sign-In with an email that already belongs to an existing local email/password account, AROVIA follows a strict 4-step security and verification workflow to prevent unauthorized account merging:
+
+```
+[Candidate clicks 'Sign in with Google']
+                     │
+                     ▼
+[Google verifies email = user@example.com]
+                     │
+                     ▼ (Backend detects auth_provider='local' exists)
+┌─────────────────────────────────────────────────────────────────────────┐
+│ STEP 1: UI Prompt                                                       │
+│ "This email is already registered with email/password.                  │
+│ Please sign in with your password first."                               │
+└────────────────────────────────────┬────────────────────────────────────┘
+                                     │
+                                     ▼ (Candidate logs in with password)
+┌─────────────────────────────────────────────────────────────────────────┐
+│ STEP 2: Post-Login Linking Confirmation Modal                           │
+│ "Would you like to link your Google account to AROVIA?"                 │
+│ [Yes, Link Google Account]                 [Not Now / Cancel]           │
+└────────────────────────────────────┬────────────────────────────────────┘
+                                     │
+           ┌─────────────────────────┴─────────────────────────┐
+           ▼ (Candidate clicks 'Yes')                          ▼ (Candidate clicks 'Cancel')
+┌──────────────────────────────────────┐            ┌──────────────────────────────────────┐
+│ STEP 3: Identity Link Verified       │            │ Existing Account Unchanged           │
+│ Google OAuth identity linked to user │            │ Password login remains active;       │
+│ record in PostgreSQL                 │            │ No Google identity linked            │
+└──────────────────┬───────────────────┘            └──────────────────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│ STEP 4: Future Sign-In Enabled                                          │
+│ Future Google Sign-In or Password login both access the same account    │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Security & Collision Rules:**
+- **Never Silently Merge:** Accounts are never merged without password re-authentication and explicit candidate consent.
+- **No Duplicate Accounts:** The database `users.email` unique constraint strictly prevents creating duplicate accounts for the same verified email address.
+- **Preserved State:** If the candidate cancels or declines the linking step, their existing password account remains completely unmodified.
+
+### 3.3 Flow Details
 - **Entry Point:** Direct navigation to `/login`.
 - **Success Path:**
   1. Candidate inputs registered email and password.
   2. Clicks **"Sign In"** (`POST /api/v1/auth/login`).
   3. Server validates credentials with `bcrypt`, resets `failed_login_attempts` to 0, and returns 15-min Access Token (JSON) and 7-day Refresh Token (HttpOnly Cookie).
   4. React `AuthContext` sets access token in memory and navigates to `/dashboard`.
-- **Google Sign-In Path:**
-  1. Candidate clicks Google button; backend verifies Google ID token.
-  2. If account matches existing Google account, logs in immediately.
-  3. *Anti-Silent Merge Collision:* If email matches a local password account, backend returns `400 Bad Request` (`{"detail": "Account registered with email/password. Please log in with password first to link Google.", "error_code": "ACCOUNT_LINKING_REQUIRED"}`).
 - **Failure / Edge Cases:**
   - *Invalid Credentials:* Returns generic `401 Unauthorized` (`"Invalid email or password"`) to prevent email enumeration.
   - *Suspicious repeated failures (>= 3):* Progressive backoff adds artificial 2-second delay.
@@ -224,7 +265,7 @@ flowchart TD
 
 ---
 
-## Flow 4: Password Reset & Recovery
+## Flow 4: Password Reset & Recovery (Production & Local Dev)
 
 ### 4.1 Overview
 Provides secure, time-limited password recovery via high-entropy single-use cryptographic tokens.
@@ -246,7 +287,13 @@ sequenceDiagram
     API->>API: Generate 32-byte secure token, compute SHA-256 hash
     API->>DB: INSERT into password_reset_tokens (hash, expires_at=NOW+15m)
     API-->>Frontend: 200 OK ("If an account exists, instructions were sent")
-    Note over Candidate,API: Link delivered via console log / SMTP email
+    
+    alt Production Environment (ENVIRONMENT=production)
+        Note over API: Dispatches email with reset link via transactional SMTP service
+    else Local Development / Testing (ENVIRONMENT=development)
+        Note over API: Backend logs reset link to application stdout console for instant testing
+    end
+
     Candidate->>Frontend: Clicks link -> /reset-password?token=XYZ
     Candidate->>Frontend: Enters new password (min 12 chars)
     Frontend->>API: POST /api/v1/auth/password-reset/confirm { token, new_password }
@@ -256,18 +303,31 @@ sequenceDiagram
     Frontend-->>Candidate: Redirect to /login with success alert
 ```
 
-### 4.2 Flow Details
-- **Entry Point:** "Forgot Password?" link on `/login`.
-- **Success Path:**
-  1. Candidate submits email on `/forgot-password`.
-  2. System always returns generic confirmation: *"If an account matches that email, reset instructions have been sent."*
-  3. If user exists, backend saves SHA-256 token hash with 15-minute expiration.
-  4. Candidate opens `/reset-password?token=<raw_token>`, inputs new passphrase (min 12 chars), and submits.
-  5. Backend verifies token hash, updates password hash, marks token `used=True`, and invalidates all existing refresh tokens.
-  6. Candidate is redirected to `/login` with a success toast.
-- **Failure / Edge Cases:**
-  - *Expired or used token:* Displays error: *"This password reset link has expired or has already been used. Please request a new one."*
-  - *Tampered token:* Returns `400 Bad Request` (`"Invalid reset token"`).
+### 4.2 Local Development vs Production Delivery Architecture
+To allow seamless local development and automated testing without requiring an external SMTP mail server:
+
+1. **Production Architecture:**
+   - Password reset links are dispatched via standard transactional email services (SMTP, SendGrid, Amazon SES).
+   - Links point to: `https://arovia.app/reset-password?token=<raw_token>`.
+
+2. **Local Development & Testing Mechanism:**
+   - Real SMTP server configuration is **NOT required** for local development.
+   - When `ENVIRONMENT=development` or `ENVIRONMENT=testing`, the backend outputs the generated password reset link directly to the application console logger (`stdout`):
+     ```text
+     [DEV AUTH] Password reset link for candidate user@example.com:
+     http://localhost:5173/reset-password?token=e4b7c89a01fd4a8b... (Expires in 15 mins)
+     ```
+   - **Security Rules for Local Dev Mechanism:**
+     - The user's plaintext password is **never logged**.
+     - Only the single-use URL link is logged to stdout in development mode.
+     - The development console log output is **strictly disabled in production** (`ENVIRONMENT=production`).
+     - No unauthenticated, public test-bypass endpoints are exposed in production.
+
+3. **Cryptographic Security Standard:**
+   - Generated tokens are 32-byte cryptographically secure strings (`secrets.token_urlsafe(32)`).
+   - Only the **SHA-256 hash** of the token is persisted in `password_reset_tokens`.
+   - Expiration window is strictly **15 minutes**.
+   - Tokens are **single-use**; marked `used=True` immediately upon password change.
 
 ---
 
@@ -409,12 +469,12 @@ flowchart TD
     SetupView --> CustomJD[Optional: Paste Target Job Description]
     SetupView --> ResumeToggle{Use Uploaded Resume Context?}
 
-    ResumeToggle -->|Yes: Linked| FormReady[Config Ready]
+    ResumeToggle -->|Yes: Linked| FormReady[Config Ready: 6 Core Planned Questions]
     ResumeToggle -->|No: Standalone| FormReady
 
     FormReady --> LaunchBtn[Click 'Start Interview']
     LaunchBtn --> APICall[POST /api/v1/interviews]
-    APICall --> SessionCreated[InterviewSession Created status='in_progress']
+    APICall --> SessionCreated[InterviewSession Created: 6 Core Questions, Hard Cap 9 Turns]
     SessionCreated --> RedirectLive[Redirect to /interview/live/:sessionId]
 ```
 
@@ -427,21 +487,33 @@ flowchart TD
   4. (Optional) Pastes custom Job Description text into textarea.
   5. Toggles whether to incorporate their active uploaded resume context.
   6. Clicks **"Start Interview"**.
+- **Interview Structure Baseline:**
+  - Configures **6 planned core questions**.
+  - Sets **Hard Cap = 9 total turns** (6 core questions + up to 3 additional dynamic follow-ups).
 - **System Response:**
-  - Backend creates `interview_sessions` record with `status='in_progress'`, total planned turns = 6.
+  - Backend creates `interview_sessions` record with `status='in_progress'`, total planned core questions = 6, max turns = 9.
   - Redirects client to `/interview/live/{session_id}`.
-- **Edge Cases:**
-  - *No resume uploaded:* Configuration runs in standalone mode using target role defaults.
 
 ---
 
 ## Flow 9: Live Interactive AI Interview Room
 
-### 9.1 Overview
+### 9.1 Overview & Turn Structure
 The core mock interview environment where candidates listen to AI questions, record or type their answers, receive dynamic follow-ups, and progress through structured interview turns.
 
 - **URL:** `/interview/live/:sessionId`
 - **Auth Required:** Yes (Session Owner).
+
+### 9.2 Turn Progression & Completion Rules
+To eliminate pacing ambiguity, AROVIA implements a deterministic turn rule:
+
+1. **6 Planned Core Questions:** Every interview has 6 planned core questions calibrated to the candidate's configured role and seniority.
+2. **Additional Dynamic Follow-Ups:** When a candidate's answer lacks technical depth, clarity, or omits a critical architectural explanation, the AI generates **1 additional follow-up question** immediately following that core answer.
+3. **Hard Cap of 9 Total Turns:** The interview enforces a strict hard ceiling of **9 total turns** (6 core + max 3 dynamic follow-ups across the entire session) to keep mock interviews bounded within a realistic 15–20 minute window.
+4. **Completion Conditions:** The live interview automatically completes and transitions to evaluation when:
+   - **Condition A:** All 6 core questions (plus any triggered follow-ups) have been answered.
+   - **Condition B:** The hard cap of 9 total turns is reached.
+   - **Condition C:** The candidate explicitly clicks **"Finish & Submit Early"** (permitted after answering at least 3 questions).
 
 ```mermaid
 sequenceDiagram
@@ -455,9 +527,9 @@ sequenceDiagram
 
     Frontend->>API: GET /api/v1/interviews/{id}/current-turn
     API->>AI: Generate calibrated question based on role, seniority, turn index
-    AI-->>API: Returns { question_text, question_type }
+    AI-->>API: Returns { question_text, question_type: "core" }
     API->>DB: INSERT into interview_question_turns
-    API-->>Frontend: 200 OK (question prompt, turn_index=0 of 6)
+    API-->>Frontend: 200 OK (question prompt, "Question 1 of 6 (Core)")
 
     Frontend->>AudioAPI: Speak question text (TTS audio)
     Frontend->>Candidate: Displays question prompt & starts turn timer
@@ -477,15 +549,15 @@ sequenceDiagram
     API->>AI: Quick depth & relevance check
     AI-->>API: Returns { needs_follow_up: true/false }
 
-    alt Needs Follow-up Probe (Max 1 per topic)
+    alt Needs Follow-up Probe & Total Turns < 9
         API->>AI: Generate targeted drill-down question
-        API->>DB: INSERT follow-up turn (is_follow_up=TRUE)
-        API-->>Frontend: Returns follow-up question
+        API->>DB: INSERT follow-up turn (is_follow_up=TRUE, question_type="follow_up")
+        API-->>Frontend: Returns follow-up question (Badge: "Follow-up on Question 1")
         Frontend-->>Candidate: Speaks & displays follow-up question
-    else Answer Complete
-        alt Turns Remaining
-            API-->>Frontend: Advance to next core turn index
-        else All Turns Complete
+    else Answer Complete / Follow-up Answered
+        alt Core Questions Remaining (< 6) AND Total Turns < 9
+            API-->>Frontend: Advance to next Core Question index
+        else All 6 Core Complete OR 9-Turn Cap Reached
             API->>DB: UPDATE interview_sessions (status='evaluating')
             API-->>Frontend: Returns { session_completed: true }
             Frontend-->>Candidate: Redirects to /interview/evaluating/:sessionId
@@ -493,17 +565,13 @@ sequenceDiagram
     end
 ```
 
-### 9.2 Flow Details
+### 9.3 Flow Details
 - **Entry Point:** Automatic transition from Setup, or resuming an in-progress session.
-- **Turn Loop:**
-  1. **Question Presentation:** Question is rendered in prominent card; browser TTS reads question aloud (with Play/Pause/Replay buttons). Turn counter displays *"Question 2 of 6"*.
-  2. **Answer Input:** Candidate clicks **"Start Speaking"** (Microphone) for real-time STT transcription or types directly into the response box.
-  3. **Editing & Verification:** Candidate can pause, review, and manually edit the transcribed text.
-  4. **Submission:** Clicks **"Submit Response"** (`POST /api/v1/interviews/{id}/submit-turn`).
-  5. **Dynamic Follow-Up:**
-     - If answer lacked depth on a core technology mentioned, system presents 1 targeted follow-up question.
-     - Otherwise, advances to next core question.
-  6. **Completion:** On final turn submission, session status transitions to `'evaluating'` and client redirects to `/interview/evaluating/{session_id}`.
+- **Turn Counter Display:** Prominently shows progress:
+  - For Core Questions: *"Question 3 of 6 (Core)"*
+  - For Follow-Up Questions: *"Follow-Up on Question 3"*
+- **Answer Input:** Candidate clicks **"Start Speaking"** (Microphone) for real-time STT transcription or types directly into the response box.
+- **Editing & Verification:** Candidate can pause, review, and manually edit the transcribed text before submitting.
 - **Failure / Edge Cases:**
   - *Browser lacks Speech API support:* STT/TTS controls display fallback badge: *"Speech API not supported in this browser — text input enabled"*.
   - *Accidental browser refresh / close:* Candidate navigates back to `/interview/live/{session_id}`; system restores current active turn state without losing submitted answers.
@@ -525,7 +593,7 @@ flowchart TD
     ShowProgress --> StartPolling[Start Polling GET /api/v1/reports/:sessionId/status every 2.5s]
 
     subgraph "Backend BackgroundTasks"
-        BgTask[Async Evaluation Task] --> FetchTurns[Aggregate all Q&A Turns]
+        BgTask[Async Evaluation Task] --> FetchTurns[Aggregate all Q&A Turns: 6 Core + Follow-ups]
         FetchTurns --> CallGemini[Gemini Structured Evaluation]
         CallGemini --> ValidateSchema[Pydantic Schema Validation & Math Score Calculation]
         ValidateSchema --> SaveReport[INSERT into evaluation_reports status='completed']
@@ -564,7 +632,7 @@ flowchart TD
     ReportView --> VisualAnalytics[Interactive Radar Chart & Dimensional Progress Bars]
     ReportView --> KeyInsights[Strengths & Priority Improvement Areas]
     ReportView --> ActionablePlan[Personalized Study & Improvement Recommendations]
-    ReportView --> TurnAccordion[Expandable Turn-by-Turn Question Analysis]
+    ReportView --> TurnAccordion[Expandable Turn-by-Turn Analysis: 6 Core + Follow-ups]
     ReportView --> ExportActions[Export Downloadable PDF Report]
 ```
 
@@ -596,7 +664,7 @@ Detailed question-by-question drill-down within the report card comparing the ca
 
 ```mermaid
 flowchart TD
-    TurnCard[Question Turn Card 1 of 6] --> ExpandBtn[Click to Expand]
+    TurnCard[Question Turn Card: Core & Follow-up Turns] --> ExpandBtn[Click to Expand]
     ExpandBtn --> ViewQuestion[AI Question Prompt]
     ExpandBtn --> ViewCandidateAns[Candidate Submitted Answer]
     ExpandBtn --> ViewScores[Relevance & Correctness Scores]
@@ -608,7 +676,7 @@ flowchart TD
 ### 12.2 Flow Details
 - **Entry Point:** Scroll down on `/reports/:sessionId`.
 - **Display Details Per Turn:**
-  - **Question Header:** Question index, question type (`Core` or `Follow-up`), and turn duration.
+  - **Question Header:** Question index, turn badge (`Core Question 1` or `Follow-up on Question 1`), and turn duration.
   - **Candidate Response Box:** Verbatim submitted answer text.
   - **Tag Breakdown:**
     - Green Tags: Key technical concepts correctly explained.
@@ -640,7 +708,7 @@ flowchart LR
 - **Key Display Elements:**
   - **Progression Line Chart:** X-axis shows interview dates; Y-axis shows overall score (0-100). Hovering reveals dimensional breakdown tooltip.
   - **Session Archive Table:**
-    - Columns: Date, Target Role, Focus, Turns, Overall Score Badge, Actions.
+    - Columns: Date, Target Role, Focus, Turns (e.g. "6 Core + 1 Follow-up"), Overall Score Badge, Actions.
     - Action: **"View Report"** link navigating directly to `/reports/{sessionId}`.
 - **Empty State:**
   - If candidate has 0 completed sessions: Displays *"No completed mock interviews yet. Launch your first session to begin tracking progress!"*
