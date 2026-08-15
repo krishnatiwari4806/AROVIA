@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from app.api.v1.router import api_router
 from app.core.config import settings
@@ -15,14 +17,13 @@ from app.core.exceptions import (
     global_exception_handler,
     validation_error_handler,
 )
+from app.core.rate_limit import limiter
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Lifespan context manager for application startup and shutdown events."""
-    # Startup: verification
     yield
-    # Shutdown: cleanup
 
 
 def create_application() -> FastAPI:
@@ -39,6 +40,10 @@ def create_application() -> FastAPI:
         redoc_url=f"{api_prefix}/redoc",
         lifespan=lifespan,
     )
+
+    # Attach Rate Limiter
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
     # Configure CORS Middleware
     allowed_origins = settings.ALLOWED_ORIGINS if settings else ["*"]
