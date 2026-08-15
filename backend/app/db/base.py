@@ -34,3 +34,12 @@ class CommonModelMixin:
         server_default=func.now(),
         nullable=False,
     )
+
+
+# Import all models to ensure metadata registration for Alembic
+from app.models.user import (  # noqa: E402
+    PasswordResetToken,
+    RefreshToken,
+    User,
+    UserOAuthIdentity,
+)
