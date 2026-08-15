@@ -1,4 +1,4 @@
-"""Pydantic v2 DTO schemas for authentication and user profiles."""
+"""Pydantic v2 DTO schemas for authentication, OAuth, profile management, and password recovery."""
 
 from datetime import datetime
 from typing import Literal, Optional
@@ -58,6 +58,69 @@ class UserLoginRequest(BaseModel):
     def normalize_email(cls, v: str) -> str:
         if isinstance(v, str):
             return v.strip().lower()
+        return v
+
+
+class GoogleAuthRequest(BaseModel):
+    """Google OAuth2 Identity Services ID Token payload."""
+
+    id_token: str = Field(..., description="Raw Google OpenID Connect ID Token.")
+
+
+class AccountLinkConfirmRequest(BaseModel):
+    """Explicit Google identity linking confirmation payload."""
+
+    id_token: str = Field(..., description="Google ID Token to link to active account.")
+
+
+class UserProfileUpdateRequest(BaseModel):
+    """Candidate career profile update payload."""
+
+    full_name: Optional[str] = Field(
+        None, min_length=2, max_length=150, description="Updated display name."
+    )
+    target_role: Optional[str] = Field(
+        None, max_length=100, description="Target job title (e.g. Backend Engineer)."
+    )
+    experience_level: Optional[Literal["junior", "mid", "senior"]] = Field(
+        None, description="Candidate seniority level tier."
+    )
+    bio: Optional[str] = Field(
+        None, max_length=2000, description="Short professional summary."
+    )
+
+
+class PasswordResetRequest(BaseModel):
+    """Password reset dispatch request payload."""
+
+    email: EmailStr = Field(..., description="Candidate account email.")
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    """Password reset confirmation payload."""
+
+    token: str = Field(..., description="32-byte URL-safe password reset token.")
+    new_password: str = Field(
+        ...,
+        min_length=12,
+        max_length=128,
+        description="New candidate passphrase (minimum 12 characters).",
+    )
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        if is_common_password(v):
+            raise ValueError(
+                "Password is too common or easily guessable. Please choose a stronger passphrase."
+            )
         return v
 
 
