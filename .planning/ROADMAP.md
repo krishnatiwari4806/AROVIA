@@ -11,7 +11,7 @@ AROVIA is built incrementally as a high-security, full-stack AI interview evalua
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
 - [x] **Phase 1: Core Foundation & Database Architecture** - FastAPI server setup, PostgreSQL async SQLAlchemy models, Alembic migrations, and testing baseline.
-- [ ] **Phase 2: Authentication & Profile Management** - Secure user registration, bcrypt password hashing, JWT token issuance, and candidate profile management.
+- [x] **Phase 2: Authentication & Profile Management** - Secure user registration, bcrypt password hashing, JWT token issuance, Google OAuth, and candidate profile management.
 - [ ] **Phase 3: Resume Ingestion & Analysis Engine** - Secure PDF/DOCX upload, magic byte verification, text extraction, and Gemini structured skill parsing.
 - [ ] **Phase 4: Interview Setup & Role Configuration** - Target role selection, seniority configuration, custom job description parsing, and session initialization.
 - [ ] **Phase 5: Interactive Adaptive Interview Engine & Voice Flow** - Sequential question generation, dynamic follow-up probing, and speech synthesis/recognition.
@@ -42,19 +42,20 @@ Plans:
 ---
 
 ### Phase 2: Authentication & Profile Management
-**Goal**: Implement secure user registration, bcrypt password hashing, JWT token authentication, and candidate profile management.
+**Goal**: Implement secure user registration, bcrypt password hashing, JWT token authentication, Google OAuth, and candidate profile management.
 **Mode**: mvp
 **Depends on**: Phase 1
-**Requirements**: AUTH-01, AUTH-02, AUTH-03, AUTH-04, AUTH-05, SECR-02
+**Requirements**: AUTH-01, AUTH-02, AUTH-03, AUTH-04, AUTH-05, PROF-01, PROF-02, SECR-02
 **Success Criteria** (what must be TRUE):
   1. Candidate can register with validated email/password and log in to receive a JWT access token.
   2. Protected endpoints derive user identity exclusively from the verified JWT token.
   3. Candidate can view and update their profile information and log out securely.
-**Plans**: 2 plans
+**Plans**: 3 plans
 
 Plans:
-- [ ] 02-01: User model, password hashing utility, JWT auth service, and register/login/logout endpoints.
-- [ ] 02-02: Profile retrieval/update endpoints, authentication dependency middleware, and auth unit tests.
+- [x] 02-01: Security primitives, SQLAlchemy 2.0 User and session ORM models, and Alembic database migration.
+- [x] 02-02: Candidate registration, login with 10 req/min rate limit & 15-min lockout, single-use refresh token rotation with HttpOnly cookies, and route guards.
+- [x] 02-03: Fail-closed Google OAuth2 authentication & explicit linking, profile endpoints (`GET`/`PUT /me`), and password reset lifecycle.
 
 ---
 
@@ -185,8 +186,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 
 | Phase | Mode | Plans Complete | Status | Completed |
 |-------|------|----------------|--------|-----------|
-| 1. Core Foundation & Database Architecture | mvp | 0/2 | Not started | - |
-| 2. Authentication & Profile Management | mvp | 0/2 | Not started | - |
+| 1. Core Foundation & Database Architecture | mvp | 2/2 | Complete | 2026-08-15 |
+| 2. Authentication & Profile Management | mvp | 3/3 | Complete | 2026-08-16 |
 | 3. Resume Ingestion & Analysis Engine | mvp | 0/2 | Not started | - |
 | 4. Interview Setup & Role Configuration | mvp | 0/2 | Not started | - |
 | 5. Interactive Adaptive Interview Engine & Voice Flow | mvp | 0/3 | Not started | - |
