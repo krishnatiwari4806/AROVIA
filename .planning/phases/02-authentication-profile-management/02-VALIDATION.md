@@ -21,7 +21,7 @@ created: 2026-08-16
 | **Config file** | `backend/pytest.ini` |
 | **Quick run command** | `pytest backend/tests/test_auth_security.py` |
 | **Full suite command** | `pytest backend/tests/` |
-| **Estimated runtime** | ~0.5 seconds |
+| **Estimated runtime** | ~0.8 seconds |
 
 ---
 
@@ -38,14 +38,14 @@ created: 2026-08-16
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---|:---:|:---:|---|---|---|---|---|:---:|:---:|
-| 02-01-01 | 01 | 1 | SECR-02 | T-02-01 | Bcrypt hashing with cost factor 12 | unit | `pytest backend/tests/test_auth_security.py` | ❌ W0 | ⬜ pending |
-| 02-01-02 | 01 | 1 | AUTH-01 | T-02-02 | User models, ORM relationships & Alembic migration | integration | `pytest backend/tests/test_auth_models.py` | ❌ W0 | ⬜ pending |
-| 02-02-01 | 02 | 2 | AUTH-01 | T-02-03 | Candidate registration with password policy & token issue | integration | `pytest backend/tests/test_auth_register.py` | ❌ W0 | ⬜ pending |
-| 02-02-02 | 02 | 2 | AUTH-02 | T-02-04 | Candidate login with 5-layer brute-force protection | integration | `pytest backend/tests/test_auth_login.py` | ❌ W0 | ⬜ pending |
-| 02-02-03 | 02 | 2 | AUTH-03 | T-02-05 | Silent refresh with single-use token rotation | integration | `pytest backend/tests/test_auth_refresh.py` | ❌ W0 | ⬜ pending |
-| 02-03-01 | 03 | 3 | AUTH-04 | T-02-06 | Google OAuth verification & anti-silent account linking | integration | `pytest backend/tests/test_auth_google.py` | ❌ W0 | ⬜ pending |
+| 02-01-01 | 01 | 1 | SECR-02 | T-02-01 | Bcrypt hashing cost factor 12, SHA-256 token hashing, common password check | unit | `pytest backend/tests/test_auth_security.py` | ❌ W0 | ⬜ pending |
+| 02-01-02 | 01 | 1 | AUTH-01 | T-02-02 | User models, ORM relationships, cascading deletes & Alembic migration | integration | `pytest backend/tests/test_auth_models.py` | ❌ W0 | ⬜ pending |
+| 02-02-01 | 02 | 2 | AUTH-01 | T-02-03 | Candidate registration with password policy, email normalization & token issue | integration | `pytest backend/tests/test_auth_register.py` | ❌ W0 | ⬜ pending |
+| 02-02-02 | 02 | 2 | AUTH-02 | T-02-04 | Login with SlowAPI (10 req/min), progressive delay, 15-min lockout & enumeration defense | integration | `pytest backend/tests/test_auth_login.py` | ❌ W0 | ⬜ pending |
+| 02-02-03 | 02 | 2 | AUTH-03 | T-02-05 | Silent refresh with single-use rotation, HttpOnly/SameSite/Path cookie assertions | integration | `pytest backend/tests/test_auth_refresh.py` | ❌ W0 | ⬜ pending |
+| 02-03-01 | 03 | 3 | AUTH-04 | T-02-06 | Google OAuth signature/claim verification, fail-closed handling & anti-silent linking | integration | `pytest backend/tests/test_auth_google.py` | ❌ W0 | ⬜ pending |
 | 02-03-02 | 03 | 3 | AUTH-05 | T-02-07 | Candidate profile get & update with JWT Bearer auth | integration | `pytest backend/tests/test_auth_profile.py` | ❌ W0 | ⬜ pending |
-| 02-03-03 | 03 | 3 | AUTH-02 | T-02-08 | Password reset with 15-min token & console dev delivery | integration | `pytest backend/tests/test_auth_reset.py` | ❌ W0 | ⬜ pending |
+| 02-03-03 | 03 | 3 | AUTH-02 | T-02-08 | Password reset with active token invalidation, stdout dev logging & refresh token revocation | integration | `pytest backend/tests/test_auth_reset.py` | ❌ W0 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -55,7 +55,7 @@ created: 2026-08-16
 
 - [ ] `backend/requirements.txt` — add `passlib[bcrypt]`, `bcrypt`, `PyJWT`, `google-auth`, `slowapi`
 - [ ] `backend/tests/conftest.py` — add user fixtures, auth client helpers, and mock Google ID token fixtures
-- [ ] `backend/tests/test_auth_security.py` — unit test suite for cryptographic password hashing and token encoding
+- [ ] `backend/tests/test_auth_security.py` — unit test suite for cryptographic password hashing, common password check, and token encoding
 
 ---
 
