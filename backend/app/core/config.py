@@ -1,6 +1,7 @@
 """Application Configuration Module."""
 
 import json
+from typing import Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,6 +20,11 @@ class Settings(BaseSettings):
         min_length=32,
         description="Secret key for cryptographic operations and JWT signing (min 32 characters).",
     )
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    GOOGLE_CLIENT_ID: Optional[str] = None
+
     DATABASE_URL: str = Field(
         ...,
         description="Async database connection URL (e.g., postgresql+asyncpg://...)",
