@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = Field(
         ..., description="Google Gemini API key for LLM structured operations."
     )
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+
+    RESUME_STORAGE_DIR: str = "storage/resumes"
+    MAX_RESUME_SIZE_BYTES: int = 5 * 1024 * 1024  # 5 MB
+
     ALLOWED_ORIGINS: list[str] | str = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",

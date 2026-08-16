@@ -12,7 +12,7 @@ AROVIA is built incrementally as a high-security, full-stack AI interview evalua
 
 - [x] **Phase 1: Core Foundation & Database Architecture** - FastAPI server setup, PostgreSQL async SQLAlchemy models, Alembic migrations, and testing baseline.
 - [x] **Phase 2: Authentication & Profile Management** - Secure user registration, bcrypt password hashing, JWT token issuance, Google OAuth, and candidate profile management.
-- [ ] **Phase 3: Resume Ingestion & Analysis Engine** - Secure PDF/DOCX upload, magic byte verification, text extraction, and Gemini structured skill parsing.
+- [x] **Phase 3: Resume Ingestion & Analysis Engine** - Secure PDF/DOCX upload, magic byte verification, text extraction, and Gemini structured skill parsing.
 - [ ] **Phase 4: Interview Setup & Role Configuration** - Target role selection, seniority configuration, custom job description parsing, and session initialization.
 - [ ] **Phase 5: Interactive Adaptive Interview Engine & Voice Flow** - Sequential question generation, dynamic follow-up probing, and speech synthesis/recognition.
 - [ ] **Phase 6: Multi-Dimensional Evaluation & Scoring Engine** - 5-dimension scoring pipeline, keyword extraction, and benchmark ideal answer synthesis.
@@ -71,8 +71,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 03-01: Defensive file upload validator, storage isolation, and `pdfplumber` / `python-docx` text extraction worker.
-- [ ] 03-02: Gemini structured schema parser for skills/experience extraction, database persistence, and resume API endpoints.
+- [x] 03-01: Defensive file upload validator, storage isolation, and `pdfplumber` / `python-docx` text extraction worker.
+- [x] 03-02: Gemini structured schema parser for skills/experience extraction, database persistence, and resume API endpoints.
 
 ---
 
@@ -188,7 +188,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 |-------|------|----------------|--------|-----------|
 | 1. Core Foundation & Database Architecture | mvp | 2/2 | Complete | 2026-08-15 |
 | 2. Authentication & Profile Management | mvp | 3/3 | Complete | 2026-08-16 |
-| 3. Resume Ingestion & Analysis Engine | mvp | 0/2 | Not started | - |
+| 3. Resume Ingestion & Analysis Engine | mvp | 2/2 | Complete | 2026-08-16 |
 | 4. Interview Setup & Role Configuration | mvp | 0/2 | Not started | - |
 | 5. Interactive Adaptive Interview Engine & Voice Flow | mvp | 0/3 | Not started | - |
 | 6. Multi-Dimensional Evaluation & Scoring Engine | mvp | 0/2 | Not started | - |

@@ -101,18 +101,19 @@ class ConflictError(AppError):
 
 
 class ValidationError(AppError):
-    """Business Logic Validation Exception (HTTP 400)."""
+    """Business Logic / Input Validation Exception (HTTP 400 or custom status)."""
 
     def __init__(
         self,
         message: str = "Validation failed",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
         error_code: str = "VALIDATION_ERROR",
         details: Optional[dict[str, Any]] = None,
         detail: Optional[str] = None,
     ) -> None:
         super().__init__(
             message=detail or message,
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status_code,
             error_code=error_code,
             details=details,
         )

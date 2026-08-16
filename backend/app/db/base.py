@@ -37,6 +37,7 @@ class CommonModelMixin:
 
 
 # Import all models to ensure metadata registration for Alembic
+from app.models.resume import Resume  # noqa: E402
 from app.models.user import (  # noqa: E402
     PasswordResetToken,
     RefreshToken,
