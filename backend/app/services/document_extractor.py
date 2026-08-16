@@ -7,6 +7,7 @@ import zipfile
 from typing import Tuple
 
 import docx
+from fastapi import status
 import pdfplumber
 
 from app.core.exceptions import ValidationError
@@ -31,24 +32,26 @@ def verify_file_magic_bytes(content: bytes, filename: str) -> str:
         The verified MIME type string.
 
     Raises:
-        ValidationError: If magic bytes do not match or extension is spoofed.
+        ValidationError (HTTP 422): If magic bytes do not match or extension is spoofed.
     """
     if not content:
-        raise ValidationError("Uploaded file is empty.")
+        raise ValidationError("Uploaded file is empty.", status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
     lower_filename = filename.lower().strip()
 
     if content.startswith(PDF_MAGIC_BYTES):
         if not lower_filename.endswith(".pdf"):
             raise ValidationError(
-                "File signature indicates PDF, but filename extension does not match .pdf"
+                "File signature indicates PDF, but filename extension does not match .pdf",
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
         return MIME_PDF
 
     if content.startswith(ZIP_MAGIC_BYTES):
         if not lower_filename.endswith(".docx"):
             raise ValidationError(
-                "File signature indicates DOCX/ZIP, but filename extension does not match .docx"
+                "File signature indicates DOCX/ZIP, but filename extension does not match .docx",
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             )
         # Verify it is a valid DOCX zip containing standard Word XML parts
         try:
@@ -58,14 +61,16 @@ def verify_file_magic_bytes(content: bytes, filename: str) -> str:
                 has_word_doc = any(name.startswith("word/") for name in file_list)
                 if not (has_content_types and has_word_doc):
                     raise ValidationError(
-                        "File is a valid ZIP archive but not a valid Word (.docx) document."
+                        "File is a valid ZIP archive but not a valid Word (.docx) document.",
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     )
         except zipfile.BadZipFile:
-            raise ValidationError("Corrupted DOCX file structure.")
+            raise ValidationError("Corrupted DOCX file structure.", status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
         return MIME_DOCX
 
     raise ValidationError(
-        "Invalid file format or corrupted signature. Only standard text-based PDF and DOCX files are allowed."
+        "Invalid file format or corrupted signature. Only standard text-based PDF and DOCX files are allowed.",
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
     )
 
 
@@ -125,7 +130,7 @@ async def extract_and_sanitize_text(content: bytes, filename: str) -> Tuple[str,
         Tuple of (sanitized_text, verified_mime_type).
 
     Raises:
-        ValidationError: If format is invalid, extraction fails, or text is under 50 characters.
+        ValidationError (HTTP 422): If format is invalid, extraction fails, or text is under 50 characters.
     """
     mime_type = verify_file_magic_bytes(content, filename)
 
@@ -135,12 +140,13 @@ async def extract_and_sanitize_text(content: bytes, filename: str) -> Tuple[str,
         elif mime_type == MIME_DOCX:
             raw_text = await asyncio.to_thread(_sync_extract_docx, content)
         else:
-            raise ValidationError(f"Unsupported MIME type: {mime_type}")
+            raise ValidationError(f"Unsupported MIME type: {mime_type}", status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
     except ValidationError:
         raise
     except Exception as exc:
         raise ValidationError(
-            f"Failed to extract text from document: {str(exc)}"
+            f"Failed to extract text from document: {str(exc)}",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         ) from exc
 
     sanitized = sanitize_extracted_text(raw_text)
@@ -149,7 +155,8 @@ async def extract_and_sanitize_text(content: bytes, filename: str) -> Tuple[str,
     non_ws_chars = len(re.sub(r"\s+", "", sanitized))
     if non_ws_chars < MIN_EXTRACTED_CHARACTERS:
         raise ValidationError(
-            "No extractable text found. Please upload a standard text-based PDF or DOCX resume (scanned image PDFs are not supported)."
+            "No extractable text found. Please upload a standard text-based PDF or DOCX resume (scanned image PDFs are not supported).",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         )
 
     return sanitized, mime_type
