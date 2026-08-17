@@ -1,6 +1,6 @@
-"""Interview Setup and Role Configuration REST API Endpoints."""
+"""Interview Setup, Turn Progression, and Audio Flow REST API Endpoints."""
 
-from typing import Annotated
+from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,9 +10,12 @@ from app.core.rate_limit import limiter
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.interview import (
+    InterviewQuestionTurnResponse,
     InterviewSessionCreateRequest,
     InterviewSessionResponse,
     PresetsCatalogResponse,
+    TurnAnswerSubmissionRequest,
+    TurnAnswerSubmissionResponse,
 )
 from app.services.interview_presets import get_presets_catalog
 from app.services.interview_service import (
@@ -120,3 +123,96 @@ async def abandon_interview_session(
         db=db, current_user=current_user, session_id=session_id
     )
     return InterviewSessionResponse.model_validate(session)
+
+
+@router.post(
+    "/sessions/{session_id}/start",
+    response_model=InterviewQuestionTurnResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Start interview run and generate Turn 0",
+)
+@limiter.limit("10/minute")
+async def start_interview_session(
+    request: Request,
+    session_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    interview_service: Annotated[
+        InterviewService, Depends(get_interview_service)
+    ],
+) -> InterviewQuestionTurnResponse:
+    """Generate the initial core question (Turn 0) and start the live interview loop."""
+    turn = await interview_service.start_interview(
+        db=db, current_user=current_user, session_id=session_id
+    )
+    return InterviewQuestionTurnResponse.model_validate(turn)
+
+
+@router.get(
+    "/sessions/{session_id}/current-turn",
+    response_model=InterviewQuestionTurnResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get current active question turn",
+)
+async def get_current_turn(
+    session_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    interview_service: Annotated[
+        InterviewService, Depends(get_interview_service)
+    ],
+) -> InterviewQuestionTurnResponse:
+    """Retrieve the current active question turn awaiting candidate response."""
+    turn = await interview_service.get_current_turn(
+        db=db, current_user=current_user, session_id=session_id
+    )
+    return InterviewQuestionTurnResponse.model_validate(turn)
+
+
+@router.post(
+    "/sessions/{session_id}/turns/{turn_id}/answer",
+    response_model=TurnAnswerSubmissionResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Submit answer for a turn and advance interview loop",
+)
+@limiter.limit("20/minute")
+async def submit_turn_answer(
+    request: Request,
+    session_id: str,
+    turn_id: str,
+    body: TurnAnswerSubmissionRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    interview_service: Annotated[
+        InterviewService, Depends(get_interview_service)
+    ],
+) -> TurnAnswerSubmissionResponse:
+    """Submit candidate answer for a turn, evaluate depth adaptively, and generate next turn or complete session."""
+    return await interview_service.submit_turn_answer(
+        db=db,
+        current_user=current_user,
+        session_id=session_id,
+        turn_id=turn_id,
+        request=body,
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/turns",
+    response_model=List[InterviewQuestionTurnResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Get full interview turn transcript history",
+)
+async def get_session_turns(
+    session_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    interview_service: Annotated[
+        InterviewService, Depends(get_interview_service)
+    ],
+) -> List[InterviewQuestionTurnResponse]:
+    """Retrieve all chronologically ordered question turns and answers for the session."""
+    turns = await interview_service.get_session_turns(
+        db=db, current_user=current_user, session_id=session_id
+    )
+    return [InterviewQuestionTurnResponse.model_validate(t) for t in turns]
