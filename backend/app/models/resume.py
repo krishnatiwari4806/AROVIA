@@ -1,6 +1,6 @@
 """Resume SQLAlchemy 2.0 ORM Model."""
 
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -8,6 +8,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
 from app.db.base import Base, CommonModelMixin
+
+if TYPE_CHECKING:
+    from app.models.interview import InterviewSession
+    from app.models.user import User
 
 
 class Resume(CommonModelMixin, Base):
@@ -31,4 +35,7 @@ class Resume(CommonModelMixin, Base):
         JSON().with_variant(JSONB, "postgresql"), nullable=False
     )
 
-    user: Mapped["User"] = relationship("User", back_populates="resume")  # type: ignore[name-defined]
+    user: Mapped["User"] = relationship("User", back_populates="resume")
+    interview_sessions: Mapped[List["InterviewSession"]] = relationship(
+        "InterviewSession", back_populates="resume"
+    )

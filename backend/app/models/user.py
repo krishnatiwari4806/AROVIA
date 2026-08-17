@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base, CommonModelMixin
 
 if TYPE_CHECKING:
+    from app.models.interview import InterviewSession
     from app.models.resume import Resume
 
 
@@ -51,6 +52,9 @@ class User(CommonModelMixin, Base):
     )
     resume: Mapped[Optional["Resume"]] = relationship(
         "Resume", back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+    interview_sessions: Mapped[List["InterviewSession"]] = relationship(
+        "InterviewSession", back_populates="user", cascade="all, delete-orphan"
     )
 
 
