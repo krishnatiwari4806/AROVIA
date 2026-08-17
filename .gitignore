@@ -50,3 +50,7 @@ htmlcov/
 *.db
 *.sqlite
 *.sqlite3
+
+# Upload storage
+backend/storage/resumes/*
+!backend/storage/resumes/.gitkeep
