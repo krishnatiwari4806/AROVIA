@@ -3,11 +3,11 @@
 import asyncio
 import json
 import logging
-from typing import Optional
+from typing import List, Optional
 
 from google import genai
 from google.genai import types
-from pydantic import ValidationError as PydanticValidationError
+from pydantic import BaseModel, Field, ValidationError as PydanticValidationError
 
 from app.core.config import settings
 from app.core.exceptions import AppError
@@ -30,13 +30,51 @@ Instructions:
 5. Write a concise 2-3 sentence executive summary into `summary` describing the candidate's core strengths and technical focus.
 """
 
+JD_EXTRACTION_PROMPT_TEMPLATE = """You are an expert technical interviewer and job requirements analyzer for the AROVIA interview evaluation platform.
+Extract structured target requirements, core responsibilities, and key technologies from the following Job Description (JD).
+
+<job_description>
+{raw_text}
+</job_description>
+
+Instructions:
+1. Extract the target job title into `job_title` if specified, or null.
+2. Extract all mandatory technical skills into `required_skills`.
+3. Extract core job responsibilities into `core_responsibilities`.
+4. Extract specific frameworks, languages, databases, cloud tools, or methodologies into `key_technologies`.
+5. Provide a 1-2 sentence qualification summary into `experience_summary`.
+"""
+
+
+class ParsedJobDescription(BaseModel):
+    """Structured extraction from a target Job Description."""
+
+    job_title: Optional[str] = Field(
+        None, description="Extracted or inferred target job title."
+    )
+    required_skills: List[str] = Field(
+        default_factory=list, description="Mandatory technical and engineering skills."
+    )
+    core_responsibilities: List[str] = Field(
+        default_factory=list, description="Primary duties and responsibilities."
+    )
+    key_technologies: List[str] = Field(
+        default_factory=list,
+        description="Specific frameworks, languages, databases, or cloud tools.",
+    )
+    experience_summary: str = Field(
+        "", description="Summary of expected experience and qualification level."
+    )
+
 
 class GeminiService:
     """Service for interacting with Google Gemini models using the google-genai SDK."""
 
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
         self.api_key = api_key or (settings.GEMINI_API_KEY if settings else "")
-        self.model = model or (settings.GEMINI_MODEL if settings else "gemini-2.5-flash")
+        self.model = model or (
+            settings.GEMINI_MODEL if settings else "gemini-2.5-flash"
+        )
         self._client: Optional[genai.Client] = None
 
     @property
@@ -105,6 +143,67 @@ class GeminiService:
             message="AI evaluation service is temporarily unavailable. Please retry shortly.",
             status_code=503,
             error_code="AI_SERVICE_UNAVAILABLE",
+        )
+
+    async def parse_job_description(self, raw_text: str) -> ParsedJobDescription:
+        """Parse raw Job Description text into structured requirements.
+
+        Falls back gracefully if AI service is temporarily unreachable to ensure
+        session initialization is not blocked.
+
+        Args:
+            raw_text: Sanitized Job Description text.
+
+        Returns:
+            ParsedJobDescription: Structured requirements and technologies.
+        """
+        prompt = JD_EXTRACTION_PROMPT_TEMPLATE.format(raw_text=raw_text)
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=ParsedJobDescription,
+            temperature=0.1,
+        )
+
+        last_exception: Optional[Exception] = None
+        max_attempts = 2
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await self.client.aio.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config=config,
+                )
+
+                if not response.text:
+                    raise ValueError("Gemini returned empty response text.")
+
+                parsed = ParsedJobDescription.model_validate_json(response.text)
+                return parsed
+
+            except (PydanticValidationError, json.JSONDecodeError) as parse_err:
+                logger.warning(
+                    f"Gemini JD response schema parsing error on attempt {attempt}: {parse_err}"
+                )
+                last_exception = parse_err
+            except Exception as exc:
+                logger.warning(
+                    f"Gemini JD request failed on attempt {attempt}/{max_attempts}: {exc}"
+                )
+                last_exception = exc
+
+            if attempt < max_attempts:
+                await asyncio.sleep(1.0)
+
+        logger.warning(
+            f"Gemini JD extraction failed after {max_attempts} attempts: {last_exception}. Falling back to default empty extraction."
+        )
+        return ParsedJobDescription(
+            job_title=None,
+            required_skills=[],
+            core_responsibilities=[],
+            key_technologies=[],
+            experience_summary="Job description captured (fallback parsing mode).",
         )
 
 
