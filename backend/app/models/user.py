@@ -1,12 +1,16 @@
 """User and Authentication SQLAlchemy 2.0 ORM Models."""
 
 from datetime import datetime
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, CommonModelMixin
+
+if TYPE_CHECKING:
+    from app.models.interview import InterviewSession
+    from app.models.resume import Resume
 
 
 class User(CommonModelMixin, Base):
@@ -45,6 +49,12 @@ class User(CommonModelMixin, Base):
     )
     reset_tokens: Mapped[List["PasswordResetToken"]] = relationship(
         "PasswordResetToken", back_populates="user", cascade="all, delete-orphan"
+    )
+    resume: Mapped[Optional["Resume"]] = relationship(
+        "Resume", back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+    interview_sessions: Mapped[List["InterviewSession"]] = relationship(
+        "InterviewSession", back_populates="user", cascade="all, delete-orphan"
     )
 
 

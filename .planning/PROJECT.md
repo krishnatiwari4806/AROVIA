@@ -12,12 +12,12 @@ Delivering realistic, adaptive AI mock interviews with rigorous, multi-dimension
 
 ### Validated
 
-(None yet — ship to validate)
+- **Phase 1: Core Foundation & Database Architecture** (FastAPI, async PostgreSQL/SQLite SQLAlchemy engine, Alembic migrations, health check).
+- **Phase 2: Authentication & Profile Management** (Bcrypt password hashing, JWT access/refresh tokens, Google OAuth verification, profile CRUD, password reset).
+- **Phase 3: Resume Ingestion & Analysis Engine** (Magic byte verification, 5MB limit, `pdfplumber`/`python-docx` extraction, Gemini structured skill parsing, atomic replacement CRUD).
 
 ### Active
 
-- [ ] **Authentication & User Profile Management**: Secure registration, login, JWT session management, bcrypt password hashing, input sanitization, and role/profile management.
-- [ ] **Resume Ingestion & Analysis Engine**: Secure file upload (PDF/DOCX) with type/size validation and sanitization, text extraction (`pypdf`/`pdfplumber`), and Gemini structured schema parsing for skills, experience, and domain strengths/gaps.
 - [ ] **Job Role & Target Profile Configuration**: Configurable target job titles, required skillsets, seniority levels, and custom job description inputs to calibrate question generation.
 - [ ] **Adaptive Interview Question Engine**: Dynamic question generation powered by Google Gemini API; starts with core domain questions and intelligently probes deeper with follow-up questions based on candidate responses.
 - [ ] **Interactive Audio & Visual Interview Room**: Professional browser-based interview experience with Text-to-Speech (AI voice synthesis via Web Speech API / browser speech synthesis), microphone capture, real-time Speech-to-Text with manual text edit fallback, and timer controls.
@@ -28,9 +28,9 @@ Delivering realistic, adaptive AI mock interviews with rigorous, multi-dimension
 
 ### Out of Scope
 
+- **Paid payment gateway/subscription billing / paid cloud APIs** — Total development and runtime cost must remain ₹0.
 - **Real-time video/facial emotion computer vision processing** — Deferred to future milestones to prioritize core audio-verbal and NLP semantic accuracy.
 - **Multi-tenant corporate HR ATS integration** — Focused on candidate self-assessment and mock interview practice for the initial release.
-- **Paid payment gateway/subscription billing** — Out of scope for college major project / portfolio MVP.
 
 ## Context
 
@@ -40,40 +40,29 @@ Delivering realistic, adaptive AI mock interviews with rigorous, multi-dimension
 
 ## Constraints
 
+- **HARD CONSTRAINT — ₹0 TOTAL COST**: Total development and runtime cost MUST remain exactly **₹0**.
+  - **Zero Paid Services**: No paid APIs, paid tiers, subscriptions, credit card requirements, or auto-charging services.
+  - **Priority Order**: Free / Open Source $\rightarrow$ Local / Browser Native $\rightarrow$ Free-Tier API $\rightarrow$ Paid Service (STRICTLY FORBIDDEN).
+  - **AI / LLM**: Google Gemini API free-tier only (`google-genai` SDK with free API key, strictly within free rate limits). Never require billing accounts.
+  - **Audio & Speech**: Browser-native Web Speech API (`webkitSpeechRecognition` & `speechSynthesis`) for zero-cost STT/TTS. Zero cloud audio/Whisper API costs.
+  - **Document & Data Processing**: Local CPU processing via open-source libraries (`pdfplumber`, `python-docx`, local disk storage `storage/resumes/`).
+  - **Email & Auth**: Local terminal/log verification links for dev/testing. Zero paid email/SMS services.
+  - **Client-Side Visuals**: Chart.js / Lucide React / jsPDF for client-side rendering and PDF generation. Zero cloud PDF generation costs.
 - **Backend Stack**: Python (FastAPI) — Chosen for native async support, performance, Pydantic type safety, and seamless Python AI/NLP ecosystem integration.
 - **Frontend Stack**: React + Vite + Vanilla CSS / modern responsive styling — Chosen for speed, flexibility, component modularity, and high-performance browser audio APIs.
-- **Database**: PostgreSQL with SQLAlchemy ORM & Alembic migrations — Chosen for relational integrity, schema migrations, and structured session/metric persistence.
-- **AI & NLP Services**: Google Gemini API (structured JSON output, prompt chaining, fast inference) + Web Speech API for low-latency browser speech synthesis & recognition.
-- **Timeline**: 45 days total development window structured into incremental, testable phases.
+- **Database**: PostgreSQL / SQLite with SQLAlchemy ORM & Alembic migrations — Relational integrity, schema migrations, and structured session persistence.
 - **Security Standard**: Server-side defensive validation on all endpoints, zero trust for client data, strict input/file sanitization, secure secret storage via `.env`.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| FastAPI Backend + React/Vite Frontend | Clean separation of concerns; high performance async API with robust AI integration in Python | — Pending |
-| PostgreSQL + SQLAlchemy + Alembic | Robust relational schema, transactional integrity for sessions/evaluations, production readiness | — Pending |
-| Google Gemini API for Generation & Scoring | Fast latency, rich structured JSON schemas, multimodal capabilities, cost-effective | — Pending |
-| Web Speech API with fallback editing | Low-latency audio-enabled experience without heavy server-side media processing bottlenecks | — Pending |
-| Hybrid Resume Parser (pdfplumber + Gemini Schema) | Accurate text extraction paired with semantic LLM entity extraction for skills & experience | — Pending |
-| Phase-by-Phase Task Execution | Ensures each milestone is small, testable, and verified before progressing | — Pending |
-
-## Evolution
-
-This document evolves at phase transitions and milestone boundaries.
-
-**After each phase transition** (via `/gsd-transition`):
-1. Requirements invalidated? → Move to Out of Scope with reason
-2. Requirements validated? → Move to Validated with phase reference
-3. New requirements emerged? → Add to Active
-4. Decisions to log? → Add to Key Decisions
-5. "What This Is" still accurate? → Update if drifted
-
-**After each milestone** (via `/gsd-complete-milestone`):
-1. Full review of all sections
-2. Core Value check — still the right priority?
-3. Audit Out of Scope — reasons still valid?
-4. Update Context with current state
+| ₹0 Zero-Cost Architecture | College major project requirement; relies exclusively on open-source, browser-native, and genuine free tiers | Locked |
+| FastAPI Backend + React/Vite Frontend | Clean separation of concerns; high performance async API with robust AI integration in Python | Validated |
+| PostgreSQL / SQLite + SQLAlchemy + Alembic | Robust relational schema, transactional integrity for sessions/evaluations, production readiness | Validated |
+| Google Gemini API (Free Tier) for AI & Parsing | Fast latency, rich structured JSON schemas (`response_schema`), generous free tier | Validated |
+| Web Speech API with fallback editing | Zero-cost, low-latency audio-enabled experience without heavy server-side media processing or paid STT/TTS | Locked |
+| Local Document Parsing (`pdfplumber` + `python-docx`) | Local CPU extraction with zero cloud parsing cost | Validated |
 
 ---
-*Last updated: 2026-08-15 after initialization*
+*Last updated: 2026-08-18*
