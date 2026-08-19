@@ -58,3 +58,6 @@ htmlcov/
 # Upload storage
 backend/storage/resumes/*
 !backend/storage/resumes/.gitkeep
+# Uploaded resume files
+storage/resumes/*
+!storage/resumes/.gitkeep
