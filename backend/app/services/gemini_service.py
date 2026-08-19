@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from google import genai
 from google.genai import types
@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, ValidationError as PydanticValidationErro
 
 from app.core.config import settings
 from app.core.exceptions import AppError
+from app.schemas.interview import GeneratedQuestion, NextTurnDecision
 from app.schemas.resume import ParsedResumeData
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,61 @@ Instructions:
 3. Extract core job responsibilities into `core_responsibilities`.
 4. Extract specific frameworks, languages, databases, cloud tools, or methodologies into `key_technologies`.
 5. Provide a 1-2 sentence qualification summary into `experience_summary`.
+"""
+
+INITIAL_QUESTION_PROMPT_TEMPLATE = """You are an expert technical interviewer conducting an adaptive mock interview for the AROVIA platform.
+Generate the very first question (Turn 0) for this candidate.
+
+Candidate Target Profile:
+- Target Role: {target_role}
+- Seniority Level: {seniority_level}
+- Interview Focus: {interview_focus}
+- Focus Skills: {focus_skills}
+
+Job Description Context:
+{jd_context}
+
+Candidate Resume Background:
+{resume_context}
+
+Instructions:
+1. Turn 0 is a warm-up question establishing baseline engineering context, domain background, or a key project mentioned on their resume that relates to the target role.
+2. Formulate a realistic, clear, and conversational interview question in `question_text`.
+3. Provide a comprehensive senior-level benchmark answer in `ideal_answer` covering expected technical depths, concepts, and best practices.
+4. Specify the primary concept being evaluated in `primary_concept`.
+"""
+
+ADAPTIVE_NEXT_TURN_PROMPT_TEMPLATE = """You are the AI technical interviewer for the AROVIA platform conducting an adaptive mock interview.
+Evaluate the candidate's latest response and determine the next interview step.
+
+Candidate Target Profile:
+- Target Role: {target_role}
+- Seniority Level: {seniority_level}
+- Interview Focus: {interview_focus}
+- Focus Skills: {focus_skills}
+
+Interview State & Pacing:
+- Current Turn Index: {current_turn_index}
+- Remaining Core Questions: {remaining_core_questions}
+- Remaining Follow-up Budget: {remaining_followup_budget}
+- Prior Turn Was Follow-up: {prior_turn_was_followup}
+
+Previous Turn Q&A:
+- Question Prompt: {previous_question}
+- Candidate Answer: {candidate_answer}
+
+Full Transcript History (Prior Turns):
+{transcript_history}
+
+Adaptive Logic & Rules:
+1. If `prior_turn_was_followup` is True, you CANNOT generate another follow-up. You MUST advance to the next core topic (or conclude if all core questions are done).
+2. If `remaining_followup_budget` <= 0, you CANNOT generate a follow-up. You MUST advance to the next core topic (or conclude if all core questions are done).
+3. If `remaining_core_questions` <= 0 and no follow-up is warranted (or budget exhausted), set `is_interview_complete=True`, `is_follow_up=False`, and leave question_text null.
+4. If follow-up IS allowed (`prior_turn_was_followup` is False and `remaining_followup_budget` > 0):
+   - Evaluate candidate answer: Did the candidate make bold claims without explaining mechanics? Was the answer shallow, vague, or missing critical trade-offs?
+   - If YES: set `is_follow_up=True`, explain why in `follow_up_reasoning`, formulate a targeted probing question in `question_text`, provide `ideal_answer`, and `primary_concept`.
+   - If NO (answer was thorough/complete) OR candidate answered well: set `is_follow_up=False`, formulate the next core question according to the progressive difficulty arc (Core Concepts -> Edge Cases & System Trade-offs), provide `ideal_answer`, and `primary_concept`.
+5. Ensure the next question does not duplicate topics already thoroughly covered in prior turns.
 """
 
 
@@ -85,17 +141,7 @@ class GeminiService:
         return self._client
 
     async def parse_resume(self, raw_text: str) -> ParsedResumeData:
-        """Parse raw resume text into structured Pydantic schema using Gemini with 1 retry.
-
-        Args:
-            raw_text: Sanitized candidate resume text.
-
-        Returns:
-            ParsedResumeData: Structured extracted career profile.
-
-        Raises:
-            AppError (503): When AI service is unavailable or unrecoverable error occurs.
-        """
+        """Parse raw resume text into structured Pydantic schema using Gemini with 1 retry."""
         prompt = RESUME_EXTRACTION_PROMPT_TEMPLATE.format(raw_text=raw_text)
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
@@ -104,7 +150,7 @@ class GeminiService:
         )
 
         last_exception: Optional[Exception] = None
-        max_attempts = 2  # 1 initial try + 1 retry
+        max_attempts = 2
 
         for attempt in range(1, max_attempts + 1):
             try:
@@ -117,7 +163,6 @@ class GeminiService:
                 if not response.text:
                     raise ValueError("Gemini returned empty response text.")
 
-                # Validate and parse response JSON into Pydantic model
                 parsed = ParsedResumeData.model_validate_json(response.text)
                 return parsed
 
@@ -133,7 +178,6 @@ class GeminiService:
                 last_exception = exc
 
             if attempt < max_attempts:
-                # 1s exponential backoff before retry
                 await asyncio.sleep(1.0)
 
         logger.error(
@@ -146,17 +190,7 @@ class GeminiService:
         )
 
     async def parse_job_description(self, raw_text: str) -> ParsedJobDescription:
-        """Parse raw Job Description text into structured requirements.
-
-        Falls back gracefully if AI service is temporarily unreachable to ensure
-        session initialization is not blocked.
-
-        Args:
-            raw_text: Sanitized Job Description text.
-
-        Returns:
-            ParsedJobDescription: Structured requirements and technologies.
-        """
+        """Parse raw Job Description text into structured requirements."""
         prompt = JD_EXTRACTION_PROMPT_TEMPLATE.format(raw_text=raw_text)
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
@@ -204,6 +238,156 @@ class GeminiService:
             core_responsibilities=[],
             key_technologies=[],
             experience_summary="Job description captured (fallback parsing mode).",
+        )
+
+    async def generate_initial_question(
+        self,
+        target_role: str,
+        seniority_level: str,
+        interview_focus: str,
+        focus_skills: Optional[List[str]] = None,
+        parsed_jd_data: Optional[Dict[str, Any]] = None,
+        resume_data: Optional[Dict[str, Any]] = None,
+    ) -> GeneratedQuestion:
+        """Generate the first initial core interview question (Turn 0)."""
+        jd_ctx = (
+            json.dumps(parsed_jd_data, indent=2)
+            if parsed_jd_data
+            else "No custom job description provided."
+        )
+        resume_ctx = (
+            json.dumps(resume_data, indent=2)
+            if resume_data
+            else "No candidate resume provided."
+        )
+        skills_str = ", ".join(focus_skills) if focus_skills else "General technical core"
+
+        prompt = INITIAL_QUESTION_PROMPT_TEMPLATE.format(
+            target_role=target_role,
+            seniority_level=seniority_level,
+            interview_focus=interview_focus,
+            focus_skills=skills_str,
+            jd_context=jd_ctx,
+            resume_context=resume_ctx,
+        )
+
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=GeneratedQuestion,
+            temperature=0.4,
+        )
+
+        max_attempts = 2
+        last_exception: Optional[Exception] = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await self.client.aio.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config=config,
+                )
+                if response.text:
+                    return GeneratedQuestion.model_validate_json(response.text)
+            except Exception as exc:
+                logger.warning(
+                    f"Gemini initial question generation attempt {attempt}/{max_attempts} failed: {exc}"
+                )
+                last_exception = exc
+
+            if attempt < max_attempts:
+                await asyncio.sleep(1.0)
+
+        logger.warning(
+            f"Initial question generation failed: {last_exception}. Using fallback template question."
+        )
+        return GeneratedQuestion(
+            question_text=f"To start our interview for the {target_role} position, could you walk me through a technically complex project you built recently and the key architectural decisions you made?",
+            ideal_answer="A structured walkthrough of an end-to-end system including requirements, architectural choices, database design, trade-offs, and scalability bottlenecks.",
+            primary_concept="System Architecture & Project Walkthrough",
+        )
+
+    async def evaluate_and_generate_next_turn(
+        self,
+        target_role: str,
+        seniority_level: str,
+        interview_focus: str,
+        focus_skills: Optional[List[str]],
+        current_turn_index: int,
+        remaining_core_questions: int,
+        remaining_followup_budget: int,
+        prior_turn_was_followup: bool,
+        previous_question: str,
+        candidate_answer: str,
+        transcript_history: List[Dict[str, Any]],
+    ) -> NextTurnDecision:
+        """Evaluate candidate answer and decide whether to probe deeper or advance."""
+        history_str = "\n".join(
+            [
+                f"Turn {t.get('turn_index')}: [Q: {t.get('question_text')}] -> [A: {t.get('candidate_answer')}]"
+                for t in transcript_history
+            ]
+        ) or "None (Turn 0 completed)"
+
+        skills_str = ", ".join(focus_skills) if focus_skills else "General technical skills"
+
+        prompt = ADAPTIVE_NEXT_TURN_PROMPT_TEMPLATE.format(
+            target_role=target_role,
+            seniority_level=seniority_level,
+            interview_focus=interview_focus,
+            focus_skills=skills_str,
+            current_turn_index=current_turn_index,
+            remaining_core_questions=remaining_core_questions,
+            remaining_followup_budget=remaining_followup_budget,
+            prior_turn_was_followup=prior_turn_was_followup,
+            previous_question=previous_question,
+            candidate_answer=candidate_answer,
+            transcript_history=history_str,
+        )
+
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=NextTurnDecision,
+            temperature=0.3,
+        )
+
+        max_attempts = 2
+        last_exception: Optional[Exception] = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await self.client.aio.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config=config,
+                )
+                if response.text:
+                    return NextTurnDecision.model_validate_json(response.text)
+            except Exception as exc:
+                logger.warning(
+                    f"Gemini next turn generation attempt {attempt}/{max_attempts} failed: {exc}"
+                )
+                last_exception = exc
+
+            if attempt < max_attempts:
+                await asyncio.sleep(1.0)
+
+        logger.warning(
+            f"Adaptive next turn generation failed: {last_exception}. Using fallback turn decision."
+        )
+        if remaining_core_questions <= 0:
+            return NextTurnDecision(
+                is_follow_up=False,
+                is_interview_complete=True,
+                follow_up_reasoning="All core questions completed.",
+            )
+
+        return NextTurnDecision(
+            is_follow_up=False,
+            is_interview_complete=False,
+            question_text=f"Moving on to our next topic for {target_role}: How do you approach caching, database indexing, and query optimization when scaling read-heavy services?",
+            ideal_answer="A comprehensive discussion covering Redis/Memcached cache-aside patterns, TTLs, invalidation strategies, B-tree indexes, execution plans, and connection pooling.",
+            primary_concept="Performance Optimization & Caching",
         )
 
 

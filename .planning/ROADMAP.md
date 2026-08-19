@@ -14,7 +14,7 @@ AROVIA is built incrementally as a high-security, full-stack AI interview evalua
 - [x] **Phase 2: Authentication & Profile Management** - Secure user registration, bcrypt password hashing, JWT token issuance, Google OAuth, and candidate profile management.
 - [x] **Phase 3: Resume Ingestion & Analysis Engine** - Secure PDF/DOCX upload, magic byte verification, text extraction, and Gemini structured skill parsing.
 - [x] **Phase 4: Interview Setup & Role Configuration** - Target role selection, seniority configuration, custom job description parsing, and session initialization.
-- [ ] **Phase 5: Interactive Adaptive Interview Engine & Voice Flow** - Sequential question generation, dynamic follow-up probing, and speech synthesis/recognition.
+- [x] **Phase 5: Interactive Adaptive Interview Engine & Voice Flow** - Sequential question generation, dynamic follow-up probing, and speech synthesis/recognition.
 - [ ] **Phase 6: Multi-Dimensional Evaluation & Scoring Engine** - 5-dimension scoring pipeline, keyword extraction, and benchmark ideal answer synthesis.
 - [ ] **Phase 7: Performance Report Card, Analytics & PDF Export** - Comprehensive report views, radar/bar visual charts, strengths/weaknesses, and PDF download.
 - [ ] **Phase 8: Candidate Dashboard, History & Progress Tracking** - Historical session list, past report viewer, and performance progression trends.
@@ -105,9 +105,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 05-01: Gemini interview prompt chaining service and adaptive follow-up state machine.
-- [ ] 05-02: Question retrieval, answer submission endpoints, and turn transition handlers.
-- [ ] 05-03: Frontend interactive interview room with Web Speech API audio synthesis/recognition and manual edit fallback.
+- [x] 05-01: Gemini interview prompt chaining service and adaptive follow-up state machine.
+- [x] 05-02: Question retrieval, answer submission endpoints, and turn transition handlers.
+- [x] 05-03: Frontend interactive interview room with Web Speech API audio synthesis/recognition and manual edit fallback.
 
 ---
 
@@ -190,7 +190,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 2. Authentication & Profile Management | mvp | 3/3 | Complete | 2026-08-16 |
 | 3. Resume Ingestion & Analysis Engine | mvp | 2/2 | Complete | 2026-08-16 |
 | 4. Interview Setup & Role Configuration | mvp | 2/2 | Complete | 2026-08-18 |
-| 5. Interactive Adaptive Interview Engine & Voice Flow | mvp | 0/3 | Not started | - |
+| 5. Interactive Adaptive Interview Engine & Voice Flow | mvp | 3/3 | Complete | 2026-08-18 |
 | 6. Multi-Dimensional Evaluation & Scoring Engine | mvp | 0/2 | Not started | - |
 | 7. Performance Report Card, Analytics & PDF Export | mvp | 0/2 | Not started | - |
 | 8. Candidate Dashboard, History & Progress Tracking | mvp | 0/2 | Not started | - |
