@@ -1,4 +1,4 @@
-"""Interview Sessions and Question Turns SQLAlchemy 2.0 ORM Models."""
+"""Interview Sessions, Question Turns, and Multi-Dimensional Evaluation ORM Models."""
 
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 class InterviewSession(CommonModelMixin, Base):
-    """Mock Interview Session lifecycle, role calibration, and turn limits."""
+    """Mock Interview Session lifecycle, role calibration, and multi-dimensional evaluation."""
 
     __tablename__ = "interview_sessions"
 
@@ -57,6 +57,13 @@ class InterviewSession(CommonModelMixin, Base):
     status: Mapped[str] = mapped_column(
         String(50), nullable=False, default="in_progress", index=True
     )
+    overall_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    dimension_scores: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), nullable=True
+    )
+    evaluation_report: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), nullable=True
+    )
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=func.now(),
@@ -82,7 +89,7 @@ class InterviewSession(CommonModelMixin, Base):
 
 
 class InterviewQuestionTurn(CommonModelMixin, Base):
-    """Interview question prompt, candidate response, and turn-level metadata."""
+    """Interview question prompt, candidate response, and multi-dimensional turn scores."""
 
     __tablename__ = "interview_question_turns"
 
@@ -109,6 +116,17 @@ class InterviewQuestionTurn(CommonModelMixin, Base):
     ideal_answer: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     turn_duration_sec: Mapped[Optional[int]] = mapped_column(
         Integer, nullable=True
+    )
+
+    # Multi-dimensional turn scores & concept feedback
+    relevance_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    correctness_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    keywords_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    clarity_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    confidence_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    turn_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    evaluation_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), nullable=True
     )
 
     session: Mapped["InterviewSession"] = relationship(
