@@ -6,9 +6,11 @@ from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.core.exceptions import AppError
 from app.core.rate_limit import limiter
 from app.db.session import get_db
 from app.models.user import User
+from app.schemas.evaluation import SessionEvaluationReportResponse
 from app.schemas.interview import (
     InterviewQuestionTurnResponse,
     InterviewSessionCreateRequest,
@@ -16,6 +18,10 @@ from app.schemas.interview import (
     PresetsCatalogResponse,
     TurnAnswerSubmissionRequest,
     TurnAnswerSubmissionResponse,
+)
+from app.services.evaluation_service import (
+    EvaluationService,
+    get_evaluation_service,
 )
 from app.services.interview_presets import get_presets_catalog
 from app.services.interview_service import (
@@ -216,3 +222,46 @@ async def get_session_turns(
         db=db, current_user=current_user, session_id=session_id
     )
     return [InterviewQuestionTurnResponse.model_validate(t) for t in turns]
+
+
+@router.post(
+    "/sessions/{session_id}/evaluate",
+    response_model=SessionEvaluationReportResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Trigger post-session multi-dimensional evaluation",
+)
+@limiter.limit("10/minute")
+async def evaluate_interview_session(
+    request: Request,
+    session_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    evaluation_service: Annotated[
+        EvaluationService, Depends(get_evaluation_service)
+    ],
+) -> SessionEvaluationReportResponse:
+    """Run full evaluation pipeline across all turns, compute composite scores, and finalize session."""
+    return await evaluation_service.evaluate_session(
+        db=db, current_user=current_user, session_id=session_id
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/evaluation",
+    response_model=SessionEvaluationReportResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get saved session evaluation report card",
+)
+async def get_session_evaluation(
+    session_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    evaluation_service: Annotated[
+        EvaluationService, Depends(get_evaluation_service)
+    ],
+) -> SessionEvaluationReportResponse:
+    """Retrieve existing evaluation report card, or compute it if not yet generated."""
+    return await evaluation_service.get_session_evaluation(
+        db=db, current_user=current_user, session_id=session_id
+    )
+
