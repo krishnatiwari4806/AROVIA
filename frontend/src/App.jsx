@@ -41,6 +41,7 @@ export function App() {
           <InterviewRoom
             sessionId={activeSessionId}
             onComplete={(res) => console.log('Interview completed:', res)}
+            onRetake={() => setActiveSessionId(null)}
           />
         ) : (
           <div className="card" style={{ textAlign: 'center', padding: '3.5rem 2rem', maxWidth: '650px', margin: '3rem auto' }}>

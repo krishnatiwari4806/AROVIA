@@ -48,4 +48,10 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   getSessionTurns: (sessionId) => request(`/interviews/sessions/${sessionId}/turns`),
+
+  // Evaluation & Scorecard
+  evaluateSession: (sessionId) =>
+    request(`/interviews/sessions/${sessionId}/evaluate`, { method: 'POST' }),
+  getSessionEvaluation: (sessionId) =>
+    request(`/interviews/sessions/${sessionId}/evaluation`),
 };
