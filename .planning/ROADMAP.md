@@ -140,8 +140,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 07-01: Report data aggregation API endpoint and score summary DTOs.
-- [ ] 07-02: Frontend Report Card UI with radar/bar visual charts, question breakdowns, and client-side PDF export.
+- [x] 07-01: Visual analytics components, pure SVG radar chart, 4-tier competency rubric, and strengths/growth cards.
+- [x] 07-02: Turn-by-turn accordion review, client-side multi-page A4 PDF export (jsPDF + html2canvas), and full ReportCard container.
 
 ---
 

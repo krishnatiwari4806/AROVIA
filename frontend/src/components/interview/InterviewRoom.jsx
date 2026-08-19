@@ -16,8 +16,9 @@ import { useSpeechSynthesis } from '../../hooks/useSpeechSynthesis';
 import { useSpeechRecognition } from '../../hooks/useSpeechRecognition';
 import { TurnTimer } from './TurnTimer';
 import { AudioVisualizer } from './AudioVisualizer';
+import ReportCard from '../report/ReportCard';
 
-export function InterviewRoom({ sessionId, onComplete }) {
+export function InterviewRoom({ sessionId, onComplete, onRetake }) {
   const [session, setSession] = useState(null);
   const [currentTurn, setCurrentTurn] = useState(null);
   const [candidateAnswer, setCandidateAnswer] = useState('');
@@ -26,6 +27,7 @@ export function InterviewRoom({ sessionId, onComplete }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [isCompleted, setIsCompleted] = useState(false);
+  const [showReport, setShowReport] = useState(false);
 
   const { speak, cancel, isSpeaking } = useSpeechSynthesis();
   const answerRef = useRef('');
@@ -159,16 +161,45 @@ export function InterviewRoom({ sessionId, onComplete }) {
     );
   }
 
+  if (showReport) {
+    return (
+      <ReportCard
+        sessionId={sessionId}
+        onRetake={onRetake}
+        onBack={() => setShowReport(false)}
+      />
+    );
+  }
+
   if (isCompleted) {
     return (
       <div className="card" style={{ textAlign: 'center', padding: '3.5rem 2rem', maxWidth: '650px', margin: '2rem auto' }}>
         <CheckCircle2 size={48} style={{ color: 'var(--success)', marginBottom: '1.25rem' }} />
         <h2 style={{ fontSize: '1.75rem', fontWeight: 700, marginBottom: '0.75rem' }}>Mock Interview Completed!</h2>
         <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.5rem' }}>
-          Great job! Your responses across all turns have been recorded. Our multi-dimensional evaluation engine is currently analyzing your technical relevance, correctness, clarity, and key concepts.
+          Great job! Your responses across all turns have been recorded. Our multi-dimensional evaluation engine is ready with your performance scorecard.
         </p>
-        <div className="badge badge-success" style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }}>
-          Status: Evaluating Answers
+
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => setShowReport(true)}
+            className="btn btn-primary"
+            style={{ padding: '0.75rem 1.5rem', fontSize: '1rem' }}
+          >
+            <Sparkles size={18} />
+            <span>View Performance Report Card</span>
+          </button>
+
+          {onRetake && (
+            <button
+              onClick={onRetake}
+              className="btn btn-secondary"
+              style={{ padding: '0.75rem 1.5rem', fontSize: '1rem' }}
+            >
+              <RotateCcw size={18} />
+              <span>Start New Session</span>
+            </button>
+          )}
         </div>
       </div>
     );
