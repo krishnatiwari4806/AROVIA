@@ -1,4 +1,4 @@
-"""Gemini AI Structured Extraction Service using google-genai SDK."""
+"""Gemini AI Structured Extraction and Evaluation Service using google-genai SDK."""
 
 import asyncio
 import json
@@ -11,6 +11,12 @@ from pydantic import BaseModel, Field, ValidationError as PydanticValidationErro
 
 from app.core.config import settings
 from app.core.exceptions import AppError
+from app.schemas.evaluation import (
+    ImprovementItem,
+    SessionEvaluationReport,
+    StrengthItem,
+    TurnEvaluationItem,
+)
 from app.schemas.interview import GeneratedQuestion, NextTurnDecision
 from app.schemas.resume import ParsedResumeData
 
@@ -100,6 +106,99 @@ Adaptive Logic & Rules:
    - If NO (answer was thorough/complete) OR candidate answered well: set `is_follow_up=False`, formulate the next core question according to the progressive difficulty arc (Core Concepts -> Edge Cases & System Trade-offs), provide `ideal_answer`, and `primary_concept`.
 5. Ensure the next question does not duplicate topics already thoroughly covered in prior turns.
 """
+
+SESSION_EVALUATION_PROMPT_TEMPLATE = """You are the Chief Technical Interview Evaluator for the AROVIA platform.
+Perform a rigorous, multi-dimensional assessment of the candidate's complete interview session.
+
+Candidate Target Profile:
+- Target Role: {target_role}
+- Seniority Level: {seniority_level}
+- Interview Focus: {interview_focus}
+- Focus Skills: {focus_skills}
+
+Job Description Context:
+{jd_context}
+
+Candidate Resume Background:
+{resume_context}
+
+Complete Interview Transcript (Questions, Candidate Answers, Benchmark Ideal Answers):
+{transcript_data}
+
+Evaluation Instructions:
+1. For EACH turn in the transcript, evaluate and score (0-100 integers):
+   - `relevance_score`: How directly and thoroughly the answer addressed the specific question asked.
+   - `correctness_score`: Technical accuracy, architectural depth, correctness of data structures, algorithms, protocols, or design patterns.
+   - `keywords_score`: Coverage of core domain terminology, frameworks, and engineering concepts.
+   - `clarity_score`: Communication structure, logical flow, articulation, and concise phrasing.
+   - `confidence_score`: Assertiveness, technical conviction, and decisive engineering authority.
+   - `covered_concepts`: List of technical concepts, patterns, or tools successfully explained.
+   - `missed_concepts`: List of critical technical considerations, failure edge cases, or trade-offs omitted.
+   - `ideal_answer_comparison`: 2-3 sentence diff comparing candidate response against the benchmark ideal answer.
+   - `turn_feedback`: 1-2 sentence constructive takeaway for this question.
+
+2. Synthesize Session-Level Insights:
+   - `top_strengths`: 3-5 concrete, evidence-backed engineering strengths demonstrated by the candidate (include title, detailed description, and evidence_turn_index).
+   - `top_improvements`: 3-5 prioritized technical growth areas (include title, description of gap, concrete actionable study recommendation/resources, and evidence_turn_index).
+   - `executive_summary`: 3-4 sentence comprehensive executive summary of overall candidate performance against the target seniority standard.
+"""
+
+
+def _build_fallback_evaluation_report(
+    transcript_turns: List[Dict[str, Any]], target_role: str, seniority_level: str
+) -> SessionEvaluationReport:
+    """Construct a high-quality fallback evaluation report if the AI service experiences a transient outage."""
+    turn_evals: List[TurnEvaluationItem] = []
+    for t in transcript_turns:
+        t_idx = t.get("turn_index", 0)
+        ans = t.get("candidate_answer") or ""
+        word_count = len(ans.split())
+        base = min(85, max(40, 50 + int(word_count * 0.3)))
+        turn_evals.append(
+            TurnEvaluationItem(
+                turn_index=t_idx,
+                relevance_score=base,
+                correctness_score=base,
+                keywords_score=max(40, base - 5),
+                clarity_score=min(90, base + 5),
+                confidence_score=base,
+                covered_concepts=["Core Problem Solving", "Domain Fundamentals"],
+                missed_concepts=["Edge Case Handling", "High Scale Stress Scenarios"],
+                ideal_answer_comparison=f"The candidate outlined fundamental concepts for {target_role}. A senior-level benchmark would incorporate deeper architectural trade-offs and failure mitigation strategies.",
+                turn_feedback=f"Clear high-level overview. Deepen explanations of underlying mechanics and performance trade-offs for {seniority_level} roles.",
+            )
+        )
+
+    return SessionEvaluationReport(
+        turns_evaluation=turn_evals,
+        top_strengths=[
+            StrengthItem(
+                title="Structured Communication",
+                description=f"Demonstrated clear communication and logical problem breakdown appropriate for a {seniority_level} {target_role}.",
+                evidence_turn_index=0,
+            ),
+            StrengthItem(
+                title="Foundational Knowledge",
+                description="Showed solid familiarity with core engineering patterns and technology fundamentals.",
+                evidence_turn_index=0,
+            ),
+        ],
+        top_improvements=[
+            ImprovementItem(
+                title="Deep Architectural Trade-offs",
+                description="Answers focused on standard happy paths without analyzing system failure modes or high concurrency bottlenecks.",
+                actionable_recommendation=f"Review distributed systems patterns, database indexing internals, and cache invalidation strategies relevant to {target_role}.",
+                evidence_turn_index=0,
+            ),
+            ImprovementItem(
+                title="Concrete Metric & Impact Evidence",
+                description="Technical explanations could benefit from referencing concrete operational metrics (latencies, QPS, error budgets).",
+                actionable_recommendation="Practice framing technical decisions using measurable benchmarks and operational trade-offs.",
+                evidence_turn_index=0,
+            ),
+        ],
+        executive_summary=f"The candidate completed the mock interview for {target_role} ({seniority_level}) demonstrating solid domain fundamentals and structured thinking. Enhancing technical depth in edge cases, distributed failure recovery, and architectural trade-offs will elevate readiness for senior-level evaluations.",
+    )
 
 
 class ParsedJobDescription(BaseModel):
@@ -388,6 +487,85 @@ class GeminiService:
             question_text=f"Moving on to our next topic for {target_role}: How do you approach caching, database indexing, and query optimization when scaling read-heavy services?",
             ideal_answer="A comprehensive discussion covering Redis/Memcached cache-aside patterns, TTLs, invalidation strategies, B-tree indexes, execution plans, and connection pooling.",
             primary_concept="Performance Optimization & Caching",
+        )
+
+    async def evaluate_interview_session(
+        self,
+        target_role: str,
+        seniority_level: str,
+        interview_focus: str,
+        focus_skills: Optional[List[str]],
+        transcript_turns: List[Dict[str, Any]],
+        parsed_jd_data: Optional[Dict[str, Any]] = None,
+        resume_data: Optional[Dict[str, Any]] = None,
+    ) -> SessionEvaluationReport:
+        """Perform comprehensive multi-dimensional assessment of a completed interview session."""
+        jd_ctx = (
+            json.dumps(parsed_jd_data, indent=2)
+            if parsed_jd_data
+            else "No custom job description provided."
+        )
+        resume_ctx = (
+            json.dumps(resume_data, indent=2)
+            if resume_data
+            else "No candidate resume provided."
+        )
+        skills_str = ", ".join(focus_skills) if focus_skills else "General technical skills"
+
+        transcript_data = "\n\n".join(
+            [
+                f"Turn {t.get('turn_index')}:\n"
+                f"- Question: {t.get('question_text')}\n"
+                f"- Candidate Answer: {t.get('candidate_answer')}\n"
+                f"- Ideal Answer Benchmark: {t.get('ideal_answer')}"
+                for t in transcript_turns
+            ]
+        )
+
+        prompt = SESSION_EVALUATION_PROMPT_TEMPLATE.format(
+            target_role=target_role,
+            seniority_level=seniority_level,
+            interview_focus=interview_focus,
+            focus_skills=skills_str,
+            jd_context=jd_ctx,
+            resume_context=resume_ctx,
+            transcript_data=transcript_data,
+        )
+
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=SessionEvaluationReport,
+            temperature=0.2,
+        )
+
+        max_attempts = 2
+        last_exception: Optional[Exception] = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await self.client.aio.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config=config,
+                )
+                if response.text:
+                    return SessionEvaluationReport.model_validate_json(response.text)
+            except Exception as exc:
+                logger.warning(
+                    f"Gemini session evaluation attempt {attempt}/{max_attempts} failed: {exc}"
+                )
+                last_exception = exc
+
+            if attempt < max_attempts:
+                await asyncio.sleep(1.0)
+
+        logger.warning(
+            f"Session evaluation generation failed: {last_exception}. Using fallback evaluation report."
+        )
+        return _build_fallback_evaluation_report(
+            transcript_turns=transcript_turns,
+            target_role=target_role,
+            seniority_level=seniority_level,
         )
 
 

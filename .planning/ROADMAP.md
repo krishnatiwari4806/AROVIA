@@ -123,8 +123,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 06-01: Multi-dimensional scoring algorithms and Gemini structured JSON evaluation schemas.
-- [ ] 06-02: Post-session evaluation orchestrator, ideal answer generator, and evaluation persistence service.
+- [x] 06-01: Multi-dimensional scoring algorithms, local filler-word heuristics, and Gemini structured JSON evaluation schemas.
+- [x] 06-02: Post-session evaluation orchestrator, focus-adaptive composite scoring, persistence, and REST endpoints.
 
 ---
 
