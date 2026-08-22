@@ -54,4 +54,28 @@ export const api = {
     request(`/interviews/sessions/${sessionId}/evaluate`, { method: 'POST' }),
   getSessionEvaluation: (sessionId) =>
     request(`/interviews/sessions/${sessionId}/evaluation`),
+
+  // Resume Ingestion & Career Profile
+  getMyResume: () => request('/resumes/me'),
+  uploadResume: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const token = localStorage.getItem('arovia_token');
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+    const response = await fetch(`${API_BASE}/resumes/upload`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      const error = new Error(data.detail || data.message || 'Resume upload failed');
+      error.status = response.status;
+      throw error;
+    }
+    return data;
+  },
+  deleteResume: () => request('/resumes/me', { method: 'DELETE' }),
 };
