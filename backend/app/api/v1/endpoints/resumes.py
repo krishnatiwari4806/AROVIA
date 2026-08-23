@@ -1,6 +1,7 @@
+
 """Resume API endpoints for candidate resume upload, review, update, and deletion."""
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Request, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -27,6 +28,7 @@ router = APIRouter()
 @limiter.limit("5/minute")
 async def upload_resume(
     request: Request,
+    response: Response,
     file: UploadFile = File(..., description="PDF or DOCX resume document (max 5 MB)"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
