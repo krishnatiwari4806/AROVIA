@@ -2,7 +2,7 @@
 
 from typing import Annotated, List
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -14,6 +14,7 @@ from app.schemas.evaluation import SessionEvaluationReportResponse
 from app.schemas.interview import (
     InterviewQuestionTurnResponse,
     InterviewSessionCreateRequest,
+    InterviewSessionListItemResponse,
     InterviewSessionResponse,
     PresetsCatalogResponse,
     TurnAnswerSubmissionRequest,
@@ -43,6 +44,44 @@ def get_presets() -> PresetsCatalogResponse:
     return get_presets_catalog()
 
 
+@router.get(
+    "/sessions",
+    response_model=List[InterviewSessionListItemResponse],
+    status_code=status.HTTP_200_OK,
+    summary="List all interview sessions for the authenticated user",
+)
+async def list_user_sessions(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    interview_service: Annotated[
+        InterviewService, Depends(get_interview_service)
+    ],
+    limit: int = 50,
+    offset: int = 0,
+) -> List[InterviewSessionListItemResponse]:
+    """Retrieve all interview sessions belonging to the authenticated user, newest first."""
+    sessions = await interview_service.list_user_sessions(
+        db=db, current_user=current_user, limit=limit, offset=offset
+    )
+    return [
+        InterviewSessionListItemResponse(
+            id=s.id,
+            target_role=s.target_role,
+            seniority_level=s.seniority_level,
+            interview_focus=s.interview_focus,
+            practice_mode=s.practice_mode,
+            status=s.status,
+            overall_score=s.overall_score,
+            dimension_scores=s.dimension_scores,
+            has_evaluation=bool(s.overall_score is not None and s.evaluation_report is not None),
+            started_at=s.started_at,
+            completed_at=s.completed_at,
+            created_at=s.created_at,
+        )
+        for s in sessions
+    ]
+
+
 @router.post(
     "/sessions",
     response_model=InterviewSessionResponse,
@@ -52,6 +91,7 @@ def get_presets() -> PresetsCatalogResponse:
 @limiter.limit("10/minute")
 async def create_interview_session(
     request: Request,
+    response: Response,
     body: InterviewSessionCreateRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -140,6 +180,7 @@ async def abandon_interview_session(
 @limiter.limit("10/minute")
 async def start_interview_session(
     request: Request,
+    response: Response,
     session_id: str,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -184,6 +225,7 @@ async def get_current_turn(
 @limiter.limit("20/minute")
 async def submit_turn_answer(
     request: Request,
+    response: Response,
     session_id: str,
     turn_id: str,
     body: TurnAnswerSubmissionRequest,
@@ -233,6 +275,7 @@ async def get_session_turns(
 @limiter.limit("10/minute")
 async def evaluate_interview_session(
     request: Request,
+    response: Response,
     session_id: str,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
