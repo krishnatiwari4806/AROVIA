@@ -8,6 +8,7 @@ import { Dashboard } from './components/dashboard/Dashboard';
 import { InterviewSetup } from './components/setup/InterviewSetup';
 import { InterviewRoom } from './components/interview/InterviewRoom';
 import { ReportCard } from './components/report/ReportCard';
+import { CoachView } from './components/coach/CoachView';
 import { HistoryView } from './components/history/HistoryView';
 import { ProfileView } from './components/profile/ProfileView';
 import { SettingsView } from './components/settings/SettingsView';
@@ -32,9 +33,10 @@ export function App() {
 
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard' | 'setup' | 'interview' | 'report' | 'history' | 'profile' | 'settings' | 'help'
+  const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard' | 'setup' | 'interview' | 'report' | 'coach' | 'history' | 'profile' | 'settings' | 'help'
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [selectedReportId, setSelectedReportId] = useState(null);
+  const [selectedCoachSessionId, setSelectedCoachSessionId] = useState(null);
 
   // Verify and hydrate authenticated candidate session
   const verifyAuthSession = useCallback(async () => {
@@ -205,9 +207,16 @@ export function App() {
     refreshActiveSession();
   };
 
+  const handleOpenCoach = (targetSessionId = null) => {
+    setSelectedCoachSessionId(targetSessionId || selectedReportId || null);
+    setCurrentView('coach');
+    refreshActiveSession();
+  };
+
   const handleRetake = () => {
     setActiveSessionId(null);
     setSelectedReportId(null);
+    setSelectedCoachSessionId(null);
     setCurrentView('setup');
     refreshActiveSession();
   };
@@ -287,30 +296,39 @@ export function App() {
           sessionId={selectedReportId}
           onRetake={handleRetake}
           onBack={() => setCurrentView('dashboard')}
+          onOpenCoach={handleOpenCoach}
         />
-      ) : /* 4. Dedicated History View */
+      ) : /* 4. Personal AI Coach Mentorship View */
+      currentView === 'coach' ? (
+        <CoachView
+          sessionId={selectedCoachSessionId || selectedReportId}
+          onBack={() => setCurrentView(selectedReportId ? 'report' : 'dashboard')}
+          onViewReport={handleViewReport}
+          onStartSetup={() => setCurrentView('setup')}
+        />
+      ) : /* 5. Dedicated History View */
       currentView === 'history' ? (
         <HistoryView
           onViewReport={handleViewReport}
           onStartSetup={() => setCurrentView('setup')}
         />
-      ) : /* 5. Dedicated Profile View */
+      ) : /* 6. Dedicated Profile View */
       currentView === 'profile' ? (
         <ProfileView
           onStartSetup={() => setCurrentView('setup')}
         />
-      ) : /* 6. Dedicated Settings View */
+      ) : /* 7. Dedicated Settings View */
       currentView === 'settings' ? (
         <SettingsView
           onReplayIntro={handleReplayIntro}
           onNavigate={(view) => setCurrentView(view)}
         />
-      ) : /* 7. Dedicated Help & Support View */
+      ) : /* 8. Dedicated Help & Support View */
       currentView === 'help' ? (
         <HelpSupportView
           onStartSetup={() => setCurrentView('setup')}
         />
-      ) : /* 8. Candidate Dashboard (Default) */
+      ) : /* 9. Candidate Dashboard (Default) */
       (
         <Dashboard
           onStartInterview={() => setCurrentView('setup')}

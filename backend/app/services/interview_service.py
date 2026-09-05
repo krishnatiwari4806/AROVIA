@@ -418,7 +418,26 @@ class InterviewService:
         result = await db.execute(query)
         return list(result.scalars().all())
 
+    async def list_user_sessions(
+        self,
+        db: AsyncSession,
+        current_user: User,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[InterviewSession]:
+        """Fetch all interview sessions belonging to the current user, ordered newest first."""
+        query = (
+            select(InterviewSession)
+            .where(InterviewSession.user_id == current_user.id)
+            .order_by(InterviewSession.started_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await db.execute(query)
+        return list(result.scalars().all())
+
 
 def get_interview_service() -> InterviewService:
     """Dependency provider for InterviewService."""
     return InterviewService()
+

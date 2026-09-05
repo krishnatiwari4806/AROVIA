@@ -1,21 +1,22 @@
 import React from 'react';
 
 /**
- * Audio wave animation visualizer for AI speaking / candidate recording states.
+ * Audio wave equalizer visualizer underneath the 3D crystal core.
  */
-export function AudioVisualizer({ active = false, label = '' }) {
-  if (!active) return null;
+export function AudioVisualizer({ isSpeaking = false, isListening = false }) {
+  const isActive = isSpeaking || isListening;
 
   return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.25rem 0.5rem' }}>
-      <div className="visualizer-wave">
-        <div className="wave-bar" />
-        <div className="wave-bar" />
-        <div className="wave-bar" />
-        <div className="wave-bar" />
-        <div className="wave-bar" />
-      </div>
-      {label && <span style={{ fontSize: '0.8rem', color: 'var(--accent-primary)', fontWeight: 600 }}>{label}</span>}
+    <div className={`arovia-waveform-container ${isActive ? 'active' : 'idle'}`}>
+      <div className="waveform-bar" style={{ animationDelay: '0.0s' }} />
+      <div className="waveform-bar" style={{ animationDelay: '0.2s' }} />
+      <div className="waveform-bar" style={{ animationDelay: '0.4s' }} />
+      <div className="waveform-bar" style={{ animationDelay: '0.1s' }} />
+      <div className="waveform-bar" style={{ animationDelay: '0.3s' }} />
+      <div className="waveform-bar" style={{ animationDelay: '0.5s' }} />
+      <div className="waveform-bar" style={{ animationDelay: '0.25s' }} />
     </div>
   );
 }
+
+export default AudioVisualizer;

@@ -11,6 +11,7 @@ from sqlalchemy.types import JSON
 from app.db.base import Base, CommonModelMixin
 
 if TYPE_CHECKING:
+    from app.models.coach import CoachConversation
     from app.models.resume import Resume
     from app.models.user import User
 
@@ -85,6 +86,9 @@ class InterviewSession(CommonModelMixin, Base):
         back_populates="session",
         cascade="all, delete-orphan",
         order_by="InterviewQuestionTurn.turn_index",
+    )
+    coach_conversations: Mapped[List["CoachConversation"]] = relationship(
+        "CoachConversation", back_populates="session"
     )
 
 

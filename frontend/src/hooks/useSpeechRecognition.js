@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { getAroviaSettings } from '../services/settingsManager';
 
 /**
  * Browser-native Speech-to-Text (STT) hook using window.webkitSpeechRecognition / SpeechRecognition.
- * ZERO COST: 100% browser-native processing.
+ * Dynamically applies language preferences from centralized settings.
  */
 export function useSpeechRecognition({ onTranscriptUpdate } = {}) {
   const [isListening, setIsListening] = useState(false);
@@ -18,7 +19,9 @@ export function useSpeechRecognition({ onTranscriptUpdate } = {}) {
         const recognition = new SpeechRecognition();
         recognition.continuous = true;
         recognition.interimResults = true;
-        recognition.lang = 'en-US';
+
+        const settings = getAroviaSettings();
+        recognition.lang = settings.languageVoice?.language || 'en-US';
 
         recognition.onresult = (event) => {
           let currentTranscript = '';
@@ -46,15 +49,27 @@ export function useSpeechRecognition({ onTranscriptUpdate } = {}) {
 
     return () => {
       if (recognitionRef.current) {
-        recognitionRef.current.abort();
+        try {
+          recognitionRef.current.abort();
+        } catch {
+          // ignore
+        }
       }
     };
   }, [onTranscriptUpdate]);
 
   const startListening = useCallback(() => {
+    const settings = getAroviaSettings();
+    if (settings.languageVoice && settings.languageVoice.sttEnabled === false) {
+      setError('Speech recognition is disabled in Settings.');
+      return;
+    }
+
     setError(null);
     if (recognitionRef.current && !isListening) {
       try {
+        // Refresh language preference before starting
+        recognitionRef.current.lang = settings.languageVoice?.language || 'en-US';
         recognitionRef.current.start();
         setIsListening(true);
       } catch (err) {
@@ -65,7 +80,11 @@ export function useSpeechRecognition({ onTranscriptUpdate } = {}) {
 
   const stopListening = useCallback(() => {
     if (recognitionRef.current && isListening) {
-      recognitionRef.current.stop();
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
       setIsListening(false);
     }
   }, [isListening]);
@@ -87,3 +106,5 @@ export function useSpeechRecognition({ onTranscriptUpdate } = {}) {
     isSupported,
   };
 }
+
+export default useSpeechRecognition;

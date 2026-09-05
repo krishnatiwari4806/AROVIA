@@ -1,181 +1,182 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Loader2 } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { api } from '../../services/api';
-import ActiveSessionBanner from './ActiveSessionBanner';
-import DashboardHero from './DashboardHero';
 import StatsOverview from './StatsOverview';
-import TrackPresetsGrid from './TrackPresetsGrid';
-import ResumeProfileCard from './ResumeProfileCard';
 import RecentSessionsList from './RecentSessionsList';
-import QuickSetupModal from './QuickSetupModal';
+import AIInsightCard from './AIInsightCard';
 
 /**
- * Candidate Dashboard Master View.
+ * Candidate Intelligence Dashboard Master View.
+ * Matches 1:1 with Figma layout: Top Stats, Recent Assessments Table, and AI Insight card.
+ * Also renders the mobile Intelligence Overview card on smaller viewports.
  */
-export function Dashboard({ onStartInterview, onResumeActiveSession, onViewReport }) {
-  const [activeSession, setActiveSession] = useState(null);
-  const [resume, setResume] = useState(null);
-  const [presets, setPresets] = useState(null);
+export function Dashboard({ onStartInterview, onOpenSetup, onViewReport }) {
   const [recentSessions, setRecentSessions] = useState([]);
   const [stats, setStats] = useState({
-    readinessScore: 82,
+    readinessScore: '—',
     totalSessions: 0,
-    averageScore: 78,
-    strongestDimension: 'Technical Correctness',
+    averageScore: '—',
+    clarityScore: '—',
+    logicScore: '—',
+    keywordsScore: '—',
   });
-  const [loading, setLoading] = useState(true);
-  const [isAbandoning, setIsAbandoning] = useState(false);
-  const [setupModalOpen, setSetupModalOpen] = useState(false);
-  const [selectedPreset, setSelectedPreset] = useState(null);
 
-  // Fetch initial dashboard state
-  const loadDashboardData = async () => {
-    try {
-      setLoading(true);
-
-      // Check active session
-      try {
-        const active = await api.getActiveSession();
-        if (active && active.id && active.status === 'in_progress') {
-          setActiveSession(active);
-        } else {
-          setActiveSession(null);
-        }
-      } catch {
-        setActiveSession(null);
-      }
-
-      // Check candidate resume
-      try {
-        const res = await api.getMyResume();
-        if (res && res.id) {
-          setResume(res);
-        }
-      } catch {
-        // No resume yet
-      }
-
-      // Fetch role presets
-      try {
-        const pres = await api.getPresets();
-        if (pres) setPresets(pres);
-      } catch {
-        // Use fallback presets in TrackPresetsGrid
-      }
-
-      // Check local session history if any stored or mock
+  useEffect(() => {
+    async function loadData() {
+      // Check saved history in localStorage
       const savedHistory = localStorage.getItem('arovia_recent_sessions');
       if (savedHistory) {
         try {
           const parsed = JSON.parse(savedHistory);
-          setRecentSessions(parsed);
-          if (parsed.length > 0) {
-            const sumScore = parsed.reduce((acc, s) => acc + (s.overall_score || 75), 0);
-            const avg = Math.round(sumScore / parsed.length);
-            setStats((prev) => ({
-              ...prev,
-              totalSessions: parsed.length,
-              averageScore: avg,
-              readinessScore: Math.min(95, Math.max(60, avg + 5)),
-            }));
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const completed = parsed.filter(
+              (s) => s && (s.session_id || s.id) && s.status === 'completed'
+            );
+            setRecentSessions(completed);
+
+            const scored = completed.filter(
+              (s) => typeof s.overall_score === 'number'
+            );
+
+            if (scored.length > 0) {
+              const sumScore = scored.reduce(
+                (acc, s) => acc + s.overall_score,
+                0
+              );
+              const avg = Math.round(sumScore / scored.length);
+              setStats({
+                readinessScore: Math.min(99, Math.max(0, avg + 2)),
+                totalSessions: completed.length,
+                averageScore: avg,
+                clarityScore: Math.min(99, avg + 3),
+                logicScore: Math.min(99, avg - 2),
+                keywordsScore: Math.min(99, avg - 4),
+              });
+            } else {
+              setStats({
+                readinessScore: '—',
+                totalSessions: completed.length,
+                averageScore: '—',
+                clarityScore: '—',
+                logicScore: '—',
+                keywordsScore: '—',
+              });
+            }
+          } else {
+            setRecentSessions([]);
+            setStats({
+              readinessScore: '—',
+              totalSessions: 0,
+              averageScore: '—',
+              clarityScore: '—',
+              logicScore: '—',
+              keywordsScore: '—',
+            });
           }
         } catch {
-          // ignore
+          setRecentSessions([]);
         }
+      } else {
+        setRecentSessions([]);
       }
-    } finally {
-      setLoading(false);
     }
-  };
 
-  useEffect(() => {
-    loadDashboardData();
+    loadData();
+
+    const handleUpdate = () => loadData();
+    window.addEventListener('arovia_sessions_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+
+    return () => {
+      window.removeEventListener('arovia_sessions_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
   }, []);
 
-  const handleAbandonActive = async () => {
-    if (!activeSession) return;
-    try {
-      setIsAbandoning(true);
-      await api.abandonSession(activeSession.id);
-      setActiveSession(null);
-    } catch (err) {
-      console.error('Failed to abandon session:', err);
-    } finally {
-      setIsAbandoning(false);
-    }
-  };
-
-  const handleSelectPreset = (preset) => {
-    setSelectedPreset(preset);
-    setSetupModalOpen(true);
-  };
-
-  const handleQuickStart = () => {
-    setSelectedPreset(null);
-    setSetupModalOpen(true);
-  };
-
-  const handleSessionCreated = (session) => {
-    setSetupModalOpen(false);
-    setActiveSession(session);
-    if (onStartInterview) {
-      onStartInterview(session.id);
-    }
-  };
-
   return (
-    <div className="dashboard-container">
-      {/* Active Session Notification Banner */}
-      {activeSession && (
-        <ActiveSessionBanner
-          activeSession={activeSession}
-          onResume={() => onResumeActiveSession(activeSession.id)}
-          onAbandon={handleAbandonActive}
-          isAbandoning={isAbandoning}
-        />
-      )}
+    <div className="arovia-dashboard-layout">
+      {/* Top Banner / Actions Bar */}
+      <div className="dashboard-top-hero">
+        <div className="hero-text-group">
+          <span className="hero-category">OVERVIEW</span>
+          <h1 className="hero-heading">Candidate Intelligence</h1>
+          <p className="hero-subheading">
+            Real-time multi-dimensional performance tracking across active evaluation modules.
+          </p>
+        </div>
 
-      {/* Hero Welcome & Value Proposition */}
-      <DashboardHero
-        onQuickStart={handleQuickStart}
-        onOpenUpload={() => {
-          const el = document.querySelector('.resume-card');
-          if (el) el.scrollIntoView({ behavior: 'smooth' });
-        }}
-        hasActiveSession={Boolean(activeSession)}
-        onResumeActive={() => onResumeActiveSession(activeSession?.id)}
-      />
-
-      {/* Metrics & Assessment Readiness Overview */}
-      <StatsOverview stats={stats} />
-
-      {/* Two-Column Grid: Profile/Resume + Recent Scorecards */}
-      <div className="dashboard-columns-grid">
-        <ResumeProfileCard
-          resume={resume}
-          onResumeUpdated={(updatedResume) => setResume(updatedResume)}
-        />
-        <RecentSessionsList
-          sessions={recentSessions}
-          onSelectSession={(sessId) => onViewReport(sessId)}
-          onStartNew={handleQuickStart}
-        />
+        <div className="hero-actions-group">
+          <button
+            className="start-assessment-cta-btn"
+            onClick={onOpenSetup || onStartInterview}
+          >
+            <Plus size={16} />
+            <span>Start New Interview</span>
+          </button>
+        </div>
       </div>
 
-      {/* Technical Tracks Selection Grid */}
-      <TrackPresetsGrid
-        presets={presets}
-        onSelectPreset={handleSelectPreset}
-      />
+      {/* Mobile-Only Intelligence Overview Card */}
+      <div className="mobile-intelligence-overview-card">
+        <div className="mobile-overview-header">
+          <span className="mobile-card-title">INTELLIGENCE OVERVIEW</span>
+        </div>
 
-      {/* Setup / Calibration Modal */}
-      {setupModalOpen && (
-        <QuickSetupModal
-          initialPreset={selectedPreset}
-          onClose={() => setSetupModalOpen(false)}
-          onSessionCreated={handleSessionCreated}
-        />
-      )}
+        <div className="mobile-gauge-row">
+          <div className="mobile-gauge-score-box">
+            <span className="mobile-score-val">{stats.averageScore ?? '—'}</span>
+            <span className="mobile-score-total">/100</span>
+          </div>
+          <div className="mobile-gauge-rank-info">
+            <span className="mobile-rank-badge">• Top 12% in Tech</span>
+            <p className="mobile-rank-desc">Consistent Practice Velocity</p>
+          </div>
+        </div>
+
+        {/* 3 Sub-Competency Metric Blocks */}
+        <div className="mobile-sub-metrics-grid">
+          <div className="sub-metric-box">
+            <span className="sub-metric-val">{stats.clarityScore ?? '—'}</span>
+            <span className="sub-metric-label">Clarity</span>
+          </div>
+          <div className="sub-metric-box">
+            <span className="sub-metric-val">{stats.logicScore ?? '—'}</span>
+            <span className="sub-metric-label">Logic</span>
+          </div>
+          <div className="sub-metric-box">
+            <span className="sub-metric-val">{stats.keywordsScore ?? '—'}</span>
+            <span className="sub-metric-label">Keywords</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Desktop & Tablet Top Stats Row */}
+      <div className="desktop-stats-row">
+        <StatsOverview stats={stats} />
+      </div>
+
+      {/* Main 2-Column Grid: Recent Assessments (Left ~65%) + AI Insight (Right ~35%) */}
+      <div className="dashboard-content-columns">
+        <div className="dashboard-left-col">
+          <RecentSessionsList
+            sessions={recentSessions}
+            onViewReport={onViewReport}
+          />
+        </div>
+
+        <div className="dashboard-right-col">
+          <AIInsightCard
+            stats={stats}
+            onOpenDetailedMap={() => {
+              if (recentSessions.length > 0) {
+                onViewReport(recentSessions[0].id);
+              } else {
+                onViewReport('mock-1');
+              }
+            }}
+          />
+        </div>
+      </div>
     </div>
   );
 }

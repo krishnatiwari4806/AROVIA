@@ -139,6 +139,28 @@ export const api = {
     request(`/interviews/sessions/${sessionId}/evaluate`, { method: 'POST' }),
   getSessionEvaluation: (sessionId) =>
     request(`/interviews/sessions/${sessionId}/evaluation`),
+  getUserSessions: (limit = 50, offset = 0) =>
+    request(`/interviews/sessions?limit=${limit}&offset=${offset}`),
+
+  // Personal AI Coach & Mentorship
+  getOrCreateCoachConversation: (sessionId = null, autoDebrief = true) =>
+    request('/coach/conversation', {
+      method: 'POST',
+      body: JSON.stringify({
+        session_id: sessionId,
+        auto_debrief: autoDebrief,
+      }),
+    }),
+  getCoachHistory: (sessionId) => request(`/coach/history/${sessionId}`),
+  sendCoachChat: (conversationId, message, contextTurnIndex = null) =>
+    request('/coach/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        message,
+        context_turn_index: contextTurnIndex,
+      }),
+    }),
 
   // Resume Ingestion & Career Profile
   getMyResume: () => request('/resumes/me'),
