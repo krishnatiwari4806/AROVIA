@@ -203,3 +203,23 @@ class TurnAnswerSubmissionResponse(BaseModel):
     is_interview_complete: bool = False
     answered_turn_id: str
     next_turn: Optional[InterviewQuestionTurnResponse] = None
+
+
+class InterviewSessionListItemResponse(BaseModel):
+    """Summarized session representation for history, dashboard, and longitudinal coaching."""
+
+    id: str
+    target_role: str
+    seniority_level: str
+    interview_focus: str
+    practice_mode: str
+    status: str
+    overall_score: Optional[int] = None
+    dimension_scores: Optional[Dict[str, Any]] = None
+    has_evaluation: bool = False
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
