@@ -1,17 +1,29 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { getAroviaSettings } from '../services/settingsManager';
 
 /**
  * Browser-native Text-to-Speech (TTS) hook using window.speechSynthesis.
- * ZERO COST: 100% browser-native processing.
+ * Dynamically calibrates to user preferences (voice, rate/speed, volume, language).
  */
 export function useSpeechSynthesis() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isSupported, setIsSupported] = useState(false);
+  const [availableVoices, setAvailableVoices] = useState([]);
   const utteranceRef = useRef(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       setIsSupported(true);
+
+      const updateVoices = () => {
+        const voices = window.speechSynthesis.getVoices();
+        if (voices && voices.length > 0) {
+          setAvailableVoices(voices);
+        }
+      };
+
+      updateVoices();
+      window.speechSynthesis.onvoiceschanged = updateVoices;
     }
   }, []);
 
@@ -22,7 +34,7 @@ export function useSpeechSynthesis() {
     }
   }, []);
 
-  const speak = useCallback((text, onEnd) => {
+  const speak = useCallback((text, onEnd, customOptions = {}) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window) || !text) {
       return;
     }
@@ -30,19 +42,40 @@ export function useSpeechSynthesis() {
     // Cancel any prior speech
     window.speechSynthesis.cancel();
 
+    const settings = getAroviaSettings();
+    const voicePrefs = settings.languageVoice || {};
+
     const utterance = new SpeechSynthesisUtterance(text);
     utteranceRef.current = utterance;
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
 
-    // Pick standard natural English voice if available
+    // Apply speed / rate
+    utterance.rate = customOptions.rate ?? voicePrefs.voiceSpeed ?? 1.0;
+    // Apply volume
+    utterance.volume = customOptions.volume ?? voicePrefs.voiceVolume ?? 1.0;
+    utterance.pitch = customOptions.pitch ?? 1.0;
+
+    // Select voice matching preferred URI or target language
     const voices = window.speechSynthesis.getVoices();
-    const englishVoice = voices.find(
-      (v) => v.lang.startsWith('en') && (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha'))
-    ) || voices.find((v) => v.lang.startsWith('en'));
+    let selectedVoice = null;
 
-    if (englishVoice) {
-      utterance.voice = englishVoice;
+    if (customOptions.voiceURI || voicePrefs.voiceURI) {
+      const targetURI = customOptions.voiceURI || voicePrefs.voiceURI;
+      selectedVoice = voices.find((v) => v.voiceURI === targetURI || v.name === targetURI);
+    }
+
+    if (!selectedVoice) {
+      const targetLang = customOptions.language || voicePrefs.language || 'en-US';
+      const langPrefix = targetLang.split('-')[0];
+
+      selectedVoice =
+        voices.find((v) => v.lang === targetLang && (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Samantha'))) ||
+        voices.find((v) => v.lang === targetLang) ||
+        voices.find((v) => v.lang.startsWith(langPrefix)) ||
+        voices.find((v) => v.lang.startsWith('en'));
+    }
+
+    if (selectedVoice) {
+      utterance.voice = selectedVoice;
     }
 
     utterance.onstart = () => {
@@ -75,5 +108,8 @@ export function useSpeechSynthesis() {
     cancel,
     isSpeaking,
     isSupported,
+    availableVoices,
   };
 }
+
+export default useSpeechSynthesis;

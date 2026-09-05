@@ -1,43 +1,45 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Mic,
   MicOff,
   Volume2,
   VolumeX,
-  Send,
-  CheckCircle2,
-  AlertTriangle,
-  RotateCcw,
   Sparkles,
-  Award,
+  Loader2,
+  ArrowRight,
+  X,
+  AlertCircle,
+  RotateCcw,
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { useSpeechSynthesis } from '../../hooks/useSpeechSynthesis';
 import { useSpeechRecognition } from '../../hooks/useSpeechRecognition';
 import { TurnTimer } from './TurnTimer';
 import { AudioVisualizer } from './AudioVisualizer';
-import ReportCard from '../report/ReportCard';
+import { CrystalCore } from './CrystalCore';
+import { getAroviaSettings } from '../../services/settingsManager';
 
-export function InterviewRoom({ sessionId, onComplete, onRetake }) {
+/**
+ * Live Interview Room Component.
+ * Restrained analytical layout with floating 3D Crystal, live question prompt,
+ * live transcription panel, microphone dictation, robust turn progression, and
+ * safe early termination & evaluation workflows without fallback fake data.
+ */
+export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
   const [session, setSession] = useState(null);
   const [currentTurn, setCurrentTurn] = useState(null);
   const [candidateAnswer, setCandidateAnswer] = useState('');
   const [elapsedDurationSec, setElapsedDurationSec] = useState(0);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [isEnding, setIsEnding] = useState(false);
   const [error, setError] = useState(null);
   const [isCompleted, setIsCompleted] = useState(false);
-  const [showReport, setShowReport] = useState(false);
 
   const { speak, cancel, isSpeaking } = useSpeechSynthesis();
-  const answerRef = useRef('');
-  answerRef.current = candidateAnswer;
 
   const handleTranscript = useCallback((text) => {
-    setCandidateAnswer((prev) => {
-      // Append or update dictation smoothly
-      return text;
-    });
+    setCandidateAnswer(text);
   }, []);
 
   const {
@@ -48,309 +50,452 @@ export function InterviewRoom({ sessionId, onComplete, onRetake }) {
     isSupported: isSttSupported,
   } = useSpeechRecognition({ onTranscriptUpdate: handleTranscript });
 
-  // Initialize or resume session turn
-  useEffect(() => {
-    let isMounted = true;
+  const initRoom = useCallback(async () => {
+    if (!sessionId) {
+      setLoading(false);
+      setError('No session ID provided.');
+      return;
+    }
 
-    async function loadInterview() {
-      try {
-        setLoading(true);
-        setError(null);
+    try {
+      setLoading(true);
+      setError(null);
 
-        const sess = await api.getSession(sessionId);
-        if (!isMounted) return;
-        setSession(sess);
-
-        if (sess.status === 'completed' || sess.status === 'evaluating') {
-          setIsCompleted(true);
-          setLoading(false);
-          return;
-        }
-
-        // Start or get active turn
-        let turn;
-        try {
-          turn = await api.startInterview(sessionId);
-        } catch {
-          turn = await api.getCurrentTurn(sessionId);
-        }
-
-        if (!isMounted) return;
-        setCurrentTurn(turn);
-        setCandidateAnswer('');
-
-        // Auto-speak question prompt
-        if (turn && turn.question_text) {
-          speak(turn.question_text);
-        }
-      } catch (err) {
-        if (isMounted) {
-          setError(err.message || 'Failed to load interview session.');
-        }
-      } finally {
-        if (isMounted) setLoading(false);
+      // 1. Fetch Session Metadata
+      const sess = await api.getSession(sessionId);
+      if (!sess) {
+        throw new Error('Interview session record not found on the server.');
       }
-    }
+      setSession(sess);
 
-    if (sessionId) {
-      loadInterview();
+      // 2. Start session (idempotent) or retrieve active turn
+      let turn;
+      try {
+        turn = await api.startInterview(sessionId);
+      } catch {
+        turn = await api.getCurrentTurn(sessionId);
+      }
+
+      if (!turn) {
+        throw new Error('Unable to retrieve initial question turn from server.');
+      }
+
+      setCurrentTurn(turn);
+      setCandidateAnswer('');
+
+      const settings = getAroviaSettings();
+      const autoPlay = settings.languageVoice?.autoPlayQuestions !== false;
+
+      if (turn && turn.question_text && autoPlay) {
+        speak(turn.question_text);
+      }
+    } catch (err) {
+      console.error('Failed to initialize interview room:', err);
+      setError(err?.message || 'Could not load interview session from the server.');
+    } finally {
+      setLoading(false);
     }
+  }, [sessionId, speak]);
+
+  useEffect(() => {
+    initRoom();
 
     return () => {
-      isMounted = false;
       cancel();
       stopListening();
     };
-  }, [sessionId, speak, cancel, stopListening]);
+  }, [initRoom, cancel, stopListening]);
 
-  // Handle answer submission
-  const handleSubmitAnswer = async (e) => {
-    if (e) e.preventDefault();
-    if (!candidateAnswer.trim() || submitting || !currentTurn) return;
+  // Submit current answer and advance to next turn
+  const handleSubmitAnswer = async () => {
+    if (submitting || isEnding || isCompleted || !currentTurn) return;
 
     try {
       setSubmitting(true);
       setError(null);
-      cancel();
       stopListening();
+      cancel();
 
-      const response = await api.submitTurnAnswer(sessionId, currentTurn.id, {
-        candidate_answer: candidateAnswer.trim(),
-        turn_duration_sec: elapsedDurationSec,
-      });
+      const answerToSubmit = candidateAnswer.trim() || 'No audible candidate response provided.';
+      const payload = {
+        candidate_answer: answerToSubmit,
+        turn_duration_sec: Math.max(1, elapsedDurationSec || 0),
+      };
 
-      if (response.is_interview_complete || !response.next_turn) {
+      // Real API Submission - no synthetic fallback questions on failure
+      const nextTurnResult = await api.submitTurnAnswer(sessionId, currentTurn.id, payload);
+
+      if (nextTurnResult?.is_interview_complete) {
+        // Evaluate session upon completing all planned questions
+        const evalReport = await api.evaluateSession(sessionId);
         setIsCompleted(true);
-        if (onComplete) onComplete(response);
-      } else {
-        setCurrentTurn(response.next_turn);
+        onComplete?.(evalReport);
+      } else if (nextTurnResult?.next_turn) {
+        // Advance to next genuine turn from backend
+        setCurrentTurn(nextTurnResult.next_turn);
         setCandidateAnswer('');
         setElapsedDurationSec(0);
-        // Auto-speak next question
-        if (response.next_turn.question_text) {
-          speak(response.next_turn.question_text);
+
+        const settings = getAroviaSettings();
+        const autoPlay = settings.languageVoice?.autoPlayQuestions !== false;
+        if (nextTurnResult.next_turn.question_text && autoPlay) {
+          speak(nextTurnResult.next_turn.question_text);
         }
       }
     } catch (err) {
-      setError(err.message || 'Failed to submit answer. Please retry.');
+      console.error('Error submitting answer or evaluating session:', err);
+      setError(err?.message || 'Error submitting answer. Please check your connection and try again.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleReplayAudio = () => {
-    if (currentTurn && currentTurn.question_text) {
-      speak(currentTurn.question_text);
+  // Dedicated End Interview Early Handler
+  const handleEndEarly = async () => {
+    if (isEnding || submitting || isCompleted) return;
+
+    const confirmed = window.confirm(
+      'Are you sure you want to end this interview session early?\n\nIf you have answered questions, an evaluation report will be generated for your responses. If no questions were answered, this session will be cancelled.'
+    );
+    if (!confirmed) return;
+
+    try {
+      setIsEnding(true);
+      setError(null);
+      stopListening();
+      cancel();
+
+      // Check if candidate provided a draft answer for the current active turn
+      const hasCurrentDraft = candidateAnswer && candidateAnswer.trim().length > 0;
+      let answeredCount = currentTurn?.turn_index ?? 0;
+
+      if (hasCurrentDraft && currentTurn?.id) {
+        try {
+          await api.submitTurnAnswer(sessionId, currentTurn.id, {
+            candidate_answer: candidateAnswer.trim(),
+            turn_duration_sec: Math.max(1, elapsedDurationSec || 0),
+          });
+          answeredCount += 1;
+        } catch (submitErr) {
+          console.warn('Could not submit final draft answer before early ending:', submitErr);
+        }
+      }
+
+      // If at least one turn was answered, trigger evaluation pipeline
+      if (answeredCount > 0 || hasCurrentDraft) {
+        try {
+          const evalReport = await api.evaluateSession(sessionId);
+          setIsCompleted(true);
+          onComplete?.(evalReport);
+          return;
+        } catch (evalErr) {
+          console.error('Evaluation request error:', evalErr);
+          if (evalErr?.message?.includes('zero answered questions') || evalErr?.status === 400) {
+            try {
+              await api.abandonSession(sessionId);
+            } catch {
+              // ignore
+            }
+            onExit?.();
+            return;
+          }
+          // Do NOT generate fake scores or fake reports
+          setError(evalErr?.message || 'Failed to generate interview evaluation. Please try again.');
+          setIsEnding(false);
+          return;
+        }
+      } else {
+        // Zero answered questions: cleanly abandon session and return to Dashboard
+        try {
+          await api.abandonSession(sessionId);
+        } catch (abandonErr) {
+          console.warn('Abandon session note:', abandonErr);
+        }
+        onExit?.();
+      }
+    } catch (err) {
+      setError(err?.message || 'Could not end interview session.');
+      setIsEnding(false);
     }
   };
 
-  const handleStopAudio = () => {
-    cancel();
-  };
-
-  const budgetSeconds =
-    session?.interview_focus === 'System Design' ? 180 : 120;
-
   if (loading) {
     return (
-      <div className="card" style={{ textAlign: 'center', padding: '4rem' }}>
-        <Sparkles size={32} style={{ color: 'var(--accent-primary)', marginBottom: '1rem', animation: 'spin 2s linear infinite' }} />
-        <h2 style={{ fontSize: '1.25rem' }}>Preparing your interview room...</h2>
-        <p style={{ color: 'var(--text-secondary)', marginTop: '0.5rem' }}>Fusing job requirements and generating personalized questions.</p>
+      <div className="interview-room-loading">
+        <Loader2 size={36} className="animate-spin text-primary" />
+        <p className="loading-text">Calibrating AROVIA AI Intelligence Room...</p>
       </div>
     );
   }
 
-  if (showReport) {
+  if (!currentTurn && error && !loading) {
     return (
-      <ReportCard
-        sessionId={sessionId}
-        onRetake={onRetake}
-        onBack={() => setShowReport(false)}
-      />
-    );
-  }
-
-  if (isCompleted) {
-    return (
-      <div className="card" style={{ textAlign: 'center', padding: '3.5rem 2rem', maxWidth: '650px', margin: '2rem auto' }}>
-        <CheckCircle2 size={48} style={{ color: 'var(--success)', marginBottom: '1.25rem' }} />
-        <h2 style={{ fontSize: '1.75rem', fontWeight: 700, marginBottom: '0.75rem' }}>Mock Interview Completed!</h2>
-        <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.5rem' }}>
-          Great job! Your responses across all turns have been recorded. Our multi-dimensional evaluation engine is ready with your performance scorecard.
-        </p>
-
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-          <button
-            onClick={() => setShowReport(true)}
-            className="btn btn-primary"
-            style={{ padding: '0.75rem 1.5rem', fontSize: '1rem' }}
+      <div className="arovia-interview-room-layout">
+        <div
+          className="room-error-card"
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: '380px',
+            textAlign: 'center',
+            padding: 'var(--space-2xl) var(--space-lg)',
+            background: 'var(--bg-surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-lg)',
+            margin: 'var(--space-2xl) auto',
+            maxWidth: '560px',
+          }}
+        >
+          <AlertCircle
+            size={42}
+            className="text-warning"
+            style={{ marginBottom: 'var(--space-md)' }}
+          />
+          <h2
+            style={{
+              fontSize: 'var(--text-lg)',
+              fontWeight: 600,
+              color: 'var(--text-primary)',
+              marginBottom: 'var(--space-xs)',
+            }}
           >
-            <Sparkles size={18} />
-            <span>View Performance Report Card</span>
-          </button>
-
-          {onRetake && (
+            Unable to load interview session
+          </h2>
+          <p
+            style={{
+              fontSize: 'var(--text-xs)',
+              color: 'var(--text-secondary)',
+              marginBottom: 'var(--space-xl)',
+              maxWidth: '420px',
+              lineHeight: 1.6,
+            }}
+          >
+            {error}
+          </p>
+          <div style={{ display: 'flex', gap: 'var(--space-md)' }}>
             <button
-              onClick={onRetake}
-              className="btn btn-secondary"
-              style={{ padding: '0.75rem 1.5rem', fontSize: '1rem' }}
+              type="button"
+              className="footer-btn secondary"
+              onClick={onExit}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-xs)' }}
             >
-              <RotateCcw size={18} />
-              <span>Start New Session</span>
+              <span>Back to Dashboard</span>
             </button>
-          )}
+            <button
+              type="button"
+              className="footer-btn primary-cta"
+              onClick={initRoom}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--space-xs)' }}
+            >
+              <RotateCcw size={15} />
+              <span>Retry</span>
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
+  const turnNumber = currentTurn?.turn_index !== undefined ? currentTurn.turn_index + 1 : 1;
+  const totalTurns = session?.planned_core_questions || session?.total_planned_turns || 6;
+  const progressPercent = Math.min(100, Math.round((turnNumber / totalTurns) * 100));
+  const roleName = session?.target_role || 'Technical Interview Session';
+  const seniorityLabel = session?.seniority_level?.toUpperCase() || 'SENIOR';
+  const focusLabel = session?.interview_focus?.toUpperCase() || 'TECHNICAL CORE';
+
   return (
-    <div className="interview-layout">
+    <div className="arovia-interview-room-layout">
+      {/* Top Header / Progress Bar */}
+      <header className="room-top-header">
+        <div className="header-meta-group">
+          <div className="live-status-pill">
+            <span className="live-pulsing-dot" />
+            <span className="live-status-label">LIVE SESSION</span>
+          </div>
+
+          <div className="role-tags-group">
+            <span className="role-title-text">{roleName}</span>
+            <span className="meta-pill">LEVEL: {seniorityLabel}</span>
+            <span className="meta-pill cyan-pill">FOCUS: {focusLabel}</span>
+          </div>
+        </div>
+
+        <div className="turn-progress-tracker">
+          <div className="tracker-label-row">
+            <span className="tracker-text">
+              QUESTION {turnNumber} OF {totalTurns}
+            </span>
+          </div>
+          <div className="tracker-bar-track">
+            <div className="tracker-bar-fill" style={{ width: `${progressPercent}%` }} />
+          </div>
+        </div>
+      </header>
+
+      {/* Alert / Error Banner if any */}
       {error && (
-        <div className="badge badge-danger" style={{ width: '100%', padding: '0.75rem', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <AlertTriangle size={16} />
+        <div className="profile-alert error-alert" style={{ margin: '0 0 var(--space-md) 0' }}>
+          <AlertCircle size={16} />
           <span>{error}</span>
         </div>
       )}
 
-      {/* Session Navigation & Progress Bar */}
-      <div className="card" style={{ padding: '1.25rem 1.5rem' }}>
-        <div className="turn-header">
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <h1 style={{ fontSize: '1.35rem', fontWeight: 700 }}>{session?.target_role || 'Target Role'}</h1>
-              <span className="badge badge-core">{session?.seniority_level?.toUpperCase()}</span>
-              <span className="badge badge-core">{session?.interview_focus}</span>
-              <span className="badge badge-core">{session?.practice_mode === 'quick' ? 'Quick Practice' : 'Full Mock'}</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
-              {currentTurn?.is_follow_up ? (
-                <span className="badge badge-followup">
-                  <Sparkles size={12} />
-                  Adaptive Follow-up Probe
+      {/* Main Interactive Stage Grid */}
+      <div className="room-stage-grid">
+        {/* CENTER STAGE: Floating 3D Crystal & Question Box */}
+        <div className="room-center-stage">
+          {/* Floating 3D Holographic Crystal */}
+          <div className="crystal-stage-container">
+            <CrystalCore isSpeaking={isSpeaking} isListening={isListening} size={150} />
+            <AudioVisualizer isSpeaking={isSpeaking} isListening={isListening} />
+          </div>
+
+          {/* AI Question Prompt Card */}
+          <div className="ai-question-card">
+            <div className="question-card-header">
+              <span className="ai-asking-badge">
+                <Sparkles size={13} />
+                {isSpeaking ? 'AROVIA IS SPEAKING' : isListening ? 'AROVIA IS LISTENING' : 'AROVIA IS ASKING'}
+              </span>
+              <div className="question-tag-pills">
+                <span className="tag-pill">
+                  {currentTurn?.category || currentTurn?.primary_concept || 'Technical Core'}
                 </span>
-              ) : (
-                <span className="badge badge-core">
-                  Turn {(currentTurn?.turn_index || 0) + 1} of {session?.planned_core_questions || 6}
-                </span>
-              )}
+                {currentTurn?.is_follow_up && (
+                  <span className="tag-pill follow-up-pill">Follow-up Probing</span>
+                )}
+              </div>
             </div>
-          </div>
 
-          <TurnTimer
-            budgetSeconds={budgetSeconds}
-            onTick={(sec) => setElapsedDurationSec(sec)}
-            isPaused={submitting}
-          />
-        </div>
+            <p className="question-prompt-text">
+              &ldquo;{currentTurn?.question_text || 'Interview question prompt loading...'}&rdquo;
+            </p>
 
-        {/* AI Question Card */}
-        <div className="question-box">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-accent)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <Award size={14} /> AI Interviewer Question
-            </span>
-            <AudioVisualizer active={isSpeaking} label="Speaking..." />
-          </div>
-
-          <div className="question-text">
-            {currentTurn?.question_text || 'Loading question...'}
-          </div>
-
-          <div className="audio-controls">
-            <button
-              type="button"
-              className="btn btn-secondary"
-              style={{ padding: '0.4rem 0.8rem', fontSize: '0.825rem' }}
-              onClick={handleReplayAudio}
-              disabled={isSpeaking}
-              title="Replay question audio"
-            >
-              <Volume2 size={14} /> Replay
-            </button>
-            {isSpeaking && (
+            {/* TTS Repeat Control */}
+            <div className="question-audio-action">
               <button
                 type="button"
-                className="btn btn-secondary"
-                style={{ padding: '0.4rem 0.8rem', fontSize: '0.825rem' }}
-                onClick={handleStopAudio}
-                title="Mute AI voice"
+                className="audio-replay-btn"
+                onClick={() => {
+                  if (isSpeaking) cancel();
+                  else if (currentTurn?.question_text) speak(currentTurn.question_text);
+                }}
+                title={isSpeaking ? 'Mute AI voice' : 'Replay question audio'}
               >
-                <VolumeX size={14} /> Mute
+                {isSpeaking ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                <span>{isSpeaking ? 'Mute AI Voice' : 'Repeat Question'}</span>
               </button>
-            )}
-          </div>
-        </div>
-
-        {/* Candidate Response Workspace */}
-        <form onSubmit={handleSubmitAnswer} className="answer-container">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <label style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-              Your Response:
-            </label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <AudioVisualizer active={isListening} label="Listening..." />
-              {isSttSupported ? (
-                <button
-                  type="button"
-                  className={`btn ${isListening ? 'btn-danger' : 'btn-secondary'}`}
-                  onClick={toggleListening}
-                  style={{ padding: '0.45rem 0.9rem', fontSize: '0.85rem' }}
-                  title={isListening ? 'Stop microphone dictation' : 'Start microphone dictation'}
-                >
-                  {isListening ? (
-                    <>
-                      <MicOff size={14} /> Stop Dictation
-                    </>
-                  ) : (
-                    <>
-                      <Mic size={14} /> Dictate Answer
-                    </>
-                  )}
-                </button>
-              ) : (
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                  Microphone dictation unavailable in this browser. You can type your answer directly.
-                </span>
-              )}
             </div>
           </div>
 
-          <div className="textarea-wrapper">
-            <textarea
-              className="answer-textarea"
-              placeholder="Speak using the microphone or type your technical answer here in detail..."
-              value={candidateAnswer}
-              onChange={(e) => setCandidateAnswer(e.target.value)}
-              disabled={submitting}
+          {/* Turn Timer */}
+          <div className="room-timer-row">
+            <TurnTimer
+              durationLimitSec={currentTurn?.ideal_time_sec || 300}
+              onDurationTick={setElapsedDurationSec}
+              isPaused={submitting || isEnding || isCompleted}
             />
           </div>
+        </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              {candidateAnswer.trim().split(/\s+/).filter(Boolean).length} words
-            </span>
+        {/* RIGHT STAGE: Live Transcription (Top) + Square Mic & Action Buttons (Bottom) */}
+        <div className="room-right-stage">
+          {/* Top: Live Transcription Card */}
+          <div className="live-transcription-card">
+            <div className="transcription-header">
+              <div className="transcription-title-box">
+                <span className="transcription-dot" />
+                <span className="transcription-title">LIVE TRANSCRIPTION</span>
+              </div>
+            </div>
 
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={!candidateAnswer.trim() || submitting}
-              style={{ minWidth: '150px' }}
-            >
-              {submitting ? (
-                <>
-                  <Sparkles size={16} className="spin" /> Evaluating...
-                </>
-              ) : (
-                <>
-                  <Send size={16} /> Submit Answer
-                </>
-              )}
-            </button>
+            <div className="transcription-content-box">
+              <textarea
+                className="transcription-textarea"
+                placeholder={
+                  isListening
+                    ? 'Listening to speech in real-time... (you can also edit or type manually)'
+                    : 'Click the square microphone button or type your answer here...'
+                }
+                value={candidateAnswer}
+                onChange={(e) => setCandidateAnswer(e.target.value)}
+                rows={7}
+                disabled={isEnding || submitting || isCompleted}
+              />
+              <div className="transcription-meta-footer">
+                <span className="word-count">
+                  {candidateAnswer.trim() ? candidateAnswer.trim().split(/\s+/).length : 0} words
+                </span>
+                <span className="edit-hint">Editable prior to submission</span>
+              </div>
+            </div>
           </div>
-        </form>
+
+          {/* Bottom: Large Square Microphone + Dual Action Controls */}
+          <div className="room-controls-card">
+            {/* Square Microphone Control */}
+            <div className="mic-square-control">
+              <button
+                type="button"
+                className={`square-mic-btn ${isListening ? 'listening' : ''}`}
+                onClick={toggleListening}
+                disabled={isEnding || submitting || isCompleted}
+                title={isListening ? 'Stop listening' : 'Start microphone dictation'}
+              >
+                {isListening ? <MicOff size={28} /> : <Mic size={28} />}
+              </button>
+              <span className="mic-status-label">
+                {isListening ? 'LISTENING...' : 'CLICK TO SPEAK'}
+              </span>
+            </div>
+
+            {/* Dual Action Buttons: END INTERVIEW & SUBMIT RESPONSE */}
+            <div className="dual-action-buttons-row">
+              <button
+                type="button"
+                className="end-interview-btn"
+                onClick={handleEndEarly}
+                disabled={isEnding || submitting || isCompleted}
+              >
+                {isEnding ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>ENDING...</span>
+                  </>
+                ) : (
+                  <>
+                    <X size={14} />
+                    <span>END INTERVIEW</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                className="submit-turn-btn"
+                onClick={handleSubmitAnswer}
+                disabled={isEnding || submitting || !currentTurn || isCompleted}
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 size={15} className="animate-spin" />
+                    <span>EVALUATING...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>SUBMIT RESPONSE</span>
+                    <ArrowRight size={15} />
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+
+export default InterviewRoom;

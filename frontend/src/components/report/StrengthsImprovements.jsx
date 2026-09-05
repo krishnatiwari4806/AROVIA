@@ -1,86 +1,101 @@
-import React from "react";
-import { ArrowUpRight, CheckCircle2, Compass, Lightbulb, Target } from "lucide-react";
+import React from 'react';
+import { CheckCircle2, TrendingUp, Lightbulb } from 'lucide-react';
 
 /**
- * Technical Strengths and Prioritized Actionable Growth Recommendations.
+ * Demonstrated Strengths vs Growth Areas matching Figma Performance Report.
+ * Renders real multi-dimensional evaluation results without fallback mock data.
  */
-export default function StrengthsImprovements({ topStrengths = [], topImprovements = [] }) {
+export function StrengthsImprovements({ topStrengths = [], topImprovements = [] }) {
+  const safeStrengths = Array.isArray(topStrengths) ? topStrengths : [];
+  const safeImprovements = Array.isArray(topImprovements) ? topImprovements : [];
+
   return (
-    <div className="insights-grid">
-      {/* Key Technical Strengths Card */}
-      <div className="insight-column strengths-card">
-        <div className="insight-column-header">
-          <div className="insight-title-group">
-            <div className="insight-icon-pill strengths-icon">
-              <CheckCircle2 size={18} />
-            </div>
-            <div>
-              <h3 className="insight-title">Demonstrated Strengths</h3>
-              <p className="insight-subtitle">Evidence-backed engineering competencies</p>
-            </div>
+    <div className="arovia-strengths-growth-grid">
+      {/* Demonstrated Strengths Card */}
+      <div className="report-card-column strengths-column">
+        <div className="column-header">
+          <div className="title-box">
+            <CheckCircle2 size={16} className="text-accent-cyan" />
+            <h4 className="column-title">Demonstrated Strengths</h4>
           </div>
-          <span className="count-pill strengths-count">{topStrengths.length}</span>
+          <span className="count-tag">
+            {safeStrengths.length} {safeStrengths.length === 1 ? 'competency' : 'competencies'}
+          </span>
         </div>
 
-        <div className="insight-list">
-          {topStrengths.length === 0 ? (
-            <p className="empty-insight">No specific strengths recorded.</p>
+        <div className="insights-card-list">
+          {safeStrengths.length === 0 ? (
+            <div
+              className="empty-insights-box"
+              style={{
+                padding: 'var(--space-lg) var(--space-md)',
+                color: 'var(--text-muted)',
+                fontSize: 'var(--text-xs)',
+                textAlign: 'center',
+              }}
+            >
+              No strengths identified yet.
+            </div>
           ) : (
-            topStrengths.map((item, idx) => (
-              <div key={`strength-${idx}`} className="insight-item-box strength-item">
-                <div className="item-header-row">
-                  <span className="item-title">{item.title}</span>
-                  {item.evidence_turn_index !== undefined && item.evidence_turn_index !== null && (
-                    <span className="turn-evidence-tag">
-                      Turn {item.evidence_turn_index + 1}
-                    </span>
-                  )}
-                </div>
-                <p className="item-description">{item.description}</p>
+            safeStrengths.map((item, idx) => (
+              <div key={idx} className="insight-card-item strength-item">
+                <h5 className="item-title">{item.title || 'Strength Identified'}</h5>
+                <p className="item-desc">{item.description || 'Demonstrated domain competency during interview.'}</p>
               </div>
             ))
           )}
         </div>
       </div>
 
-      {/* Prioritized Actionable Improvements Card */}
-      <div className="insight-column improvements-card">
-        <div className="insight-column-header">
-          <div className="insight-title-group">
-            <div className="insight-icon-pill improvements-icon">
-              <Compass size={18} />
-            </div>
-            <div>
-              <h3 className="insight-title">Prioritized Growth Areas</h3>
-              <p className="insight-subtitle">Actionable recommendations & study topics</p>
-            </div>
+      {/* Growth Areas Card */}
+      <div className="report-card-column growth-column">
+        <div className="column-header">
+          <div className="title-box">
+            <TrendingUp size={16} className="text-accent-violet" />
+            <h4 className="column-title">Growth Areas</h4>
           </div>
-          <span className="count-pill improvements-count">{topImprovements.length}</span>
+          <span className="count-tag">
+            {safeImprovements.length} {safeImprovements.length === 1 ? 'recommendation' : 'recommendations'}
+          </span>
         </div>
 
-        <div className="insight-list">
-          {topImprovements.length === 0 ? (
-            <p className="empty-insight">No specific growth areas identified.</p>
+        <div className="insights-card-list">
+          {safeImprovements.length === 0 ? (
+            <div
+              className="empty-insights-box"
+              style={{
+                padding: 'var(--space-lg) var(--space-md)',
+                color: 'var(--text-muted)',
+                fontSize: 'var(--text-xs)',
+                textAlign: 'center',
+              }}
+            >
+              No improvement areas identified yet.
+            </div>
           ) : (
-            topImprovements.map((item, idx) => (
-              <div key={`improvement-${idx}`} className="insight-item-box improvement-item">
-                <div className="item-header-row">
-                  <span className="item-title">{item.title}</span>
-                  {item.evidence_turn_index !== undefined && item.evidence_turn_index !== null && (
-                    <span className="turn-evidence-tag warning">
-                      Turn {item.evidence_turn_index + 1}
-                    </span>
-                  )}
-                </div>
-                <p className="item-description">{item.description}</p>
-
+            safeImprovements.map((item, idx) => (
+              <div key={idx} className="insight-card-item growth-item">
+                <h5 className="item-title">{item.title || 'Growth Opportunity'}</h5>
+                <p className="item-desc">{item.description || 'Identified competency growth gap.'}</p>
                 {item.actionable_recommendation && (
-                  <div className="recommendation-callout">
-                    <div className="rec-header">
-                      <Lightbulb size={14} className="rec-icon" />
-                      <span className="rec-title">Actionable Recommendation</span>
+                  <div
+                    className="item-recommendation-box"
+                    style={{
+                      marginTop: 'var(--space-xs)',
+                      paddingTop: 'var(--space-xs)',
+                      borderTop: '1px dashed var(--border)',
+                      fontSize: 'var(--text-xs)',
+                      color: 'var(--text-secondary)',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 'var(--space-2xs)',
+                    }}
+                  >
+                    <Lightbulb size={13} className="text-accent-violet" style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <div>
+                      <strong style={{ color: 'var(--text-primary)' }}>Actionable Study Advice: </strong>
+                      <span>{item.actionable_recommendation}</span>
                     </div>
-                    <p className="rec-text">{item.actionable_recommendation}</p>
                   </div>
                 )}
               </div>
@@ -91,3 +106,5 @@ export default function StrengthsImprovements({ topStrengths = [], topImprovemen
     </div>
   );
 }
+
+export default StrengthsImprovements;

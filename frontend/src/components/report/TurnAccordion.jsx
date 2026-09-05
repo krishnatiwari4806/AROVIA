@@ -1,222 +1,196 @@
-import React, { useState } from "react";
-import { Check, ChevronDown, ChevronUp, Clock, HelpCircle, MessageSquare, Mic, Sparkles, X } from "lucide-react";
+import React, { useState } from 'react';
+import { ChevronDown, ChevronUp, MessageSquare, Sparkles, Check, X, Clock } from 'lucide-react';
 
 /**
- * Collapsible Turn-by-Turn Question & Answer Breakdown Component.
+ * Turn-by-Turn Review Accordions matching Figma Performance Report.
+ * Renders real transcript evaluations without fallback mock turns or scores.
  */
-export function TurnCard({ turn, defaultExpanded = false }) {
-  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+export function TurnAccordion({ turnsEvaluation = [] }) {
+  const safeTurns = Array.isArray(turnsEvaluation) ? turnsEvaluation : [];
+  const [expandedIndex, setExpandedIndex] = useState(0);
 
-  if (!turn) return null;
-
-  const {
-    turn_index = 0,
-    question_type = "core",
-    question_text = "",
-    candidate_answer = "",
-    ideal_answer = "",
-    turn_duration_sec,
-    turn_score = 0,
-    relevance_score = 0,
-    correctness_score = 0,
-    keywords_score = 0,
-    clarity_score = 0,
-    confidence_score = 0,
-    covered_concepts = [],
-    missed_concepts = [],
-    ideal_answer_comparison = "",
-    turn_feedback = "",
-  } = turn;
-
-  const isFollowUp = question_type === "follow_up" || turn.is_follow_up;
-
-  // Filler stats from evaluation data if present
-  const fillerStats = turn.evaluation_data?.filler_word_stats || null;
-
-  const getScoreColor = (val) => {
-    if (val >= 85) return "#10b981";
-    if (val >= 70) return "#3b82f6";
-    if (val >= 50) return "#f59e0b";
-    return "#f43f5e";
+  const toggleExpand = (idx) => {
+    setExpandedIndex(expandedIndex === idx ? -1 : idx);
   };
 
   return (
-    <div className={`turn-accordion-card ${isExpanded ? "expanded" : ""}`}>
-      {/* Accordion Header */}
-      <div
-        className="turn-accordion-header"
-        onClick={() => setIsExpanded(!isExpanded)}
-        role="button"
-        tabIndex={0}
-        aria-expanded={isExpanded}
-      >
-        <div className="turn-header-left">
-          <span className={`turn-index-pill ${isFollowUp ? "followup" : ""}`}>
-            {isFollowUp ? `Turn ${turn_index + 1}: Follow-up` : `Turn ${turn_index + 1}: Core`}
-          </span>
-          <span className="turn-question-preview">{question_text}</span>
-        </div>
-
-        <div className="turn-header-right">
-          <span className="turn-score-badge" style={{ color: getScoreColor(turn_score) }}>
-            {turn_score}%
-          </span>
-          {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-        </div>
+    <div className="arovia-turn-accordion-container">
+      <div className="accordion-section-header">
+        <h4 className="accordion-section-title">Turn-by-Turn Review</h4>
+        <span className="accordion-count-badge">
+          {safeTurns.length} {safeTurns.length === 1 ? 'Evaluated Turn' : 'Evaluated Turns'}
+        </span>
       </div>
 
-      {/* Expanded Accordion Body */}
-      {isExpanded && (
-        <div className="turn-accordion-body">
-          {/* Side-by-Side Q&A Comparison */}
-          <div className="qa-comparison-grid">
-            <div className="qa-box candidate-box">
-              <div className="qa-box-header">
-                <MessageSquare size={14} />
-                <span>Your Transcribed Answer</span>
-              </div>
-              <p className="qa-box-content">
-                {candidate_answer || "No response recorded."}
-              </p>
-            </div>
+      {safeTurns.length === 0 ? (
+        <div
+          style={{
+            padding: 'var(--space-xl) var(--space-md)',
+            textAlign: 'center',
+            background: 'var(--bg-surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-lg)',
+            color: 'var(--text-muted)',
+            fontSize: 'var(--text-xs)',
+          }}
+        >
+          No turn-level evaluation available.
+        </div>
+      ) : (
+        <div className="accordion-list">
+          {safeTurns.map((turn, idx) => {
+            const isExpanded = expandedIndex === idx;
+            const turnNum = (turn.turn_index !== undefined ? turn.turn_index : idx) + 1;
+            const hasScore = typeof turn.turn_score === 'number';
+            const scoreDisplay = hasScore ? `${turn.turn_score}/100` : '—';
+            const coveredList = Array.isArray(turn.covered_concepts) ? turn.covered_concepts : [];
+            const missedList = Array.isArray(turn.missed_concepts) ? turn.missed_concepts : [];
+            const duration = turn.turn_duration_sec ?? turn.duration_sec;
+            const fillerCount =
+              turn.filler_words ?? turn.evaluation_data?.filler_word_stats?.count;
 
-            <div className="qa-box ideal-box">
-              <div className="qa-box-header">
-                <Sparkles size={14} />
-                <span>Senior Benchmark Ideal Answer</span>
-              </div>
-              <p className="qa-box-content">
-                {ideal_answer || "Benchmark answer synthesized for senior standard."}
-              </p>
-            </div>
-          </div>
-
-          {/* Benchmark Gap Analysis Diff */}
-          {ideal_answer_comparison && (
-            <div className="turn-feedback-takeaway">
-              <strong>Benchmark Gap Analysis: </strong>
-              {ideal_answer_comparison}
-            </div>
-          )}
-
-          {/* Concept Matrix */}
-          <div className="concept-matrix-section">
-            {covered_concepts && covered_concepts.length > 0 && (
-              <div className="concept-group">
-                <span className="concept-group-label">Covered Concepts:</span>
-                <div className="concept-pills">
-                  {covered_concepts.map((c, i) => (
-                    <span key={`covered-${i}`} className="concept-pill covered">
-                      <Check size={12} style={{ display: "inline", marginRight: "4px" }} />
-                      {c}
+            return (
+              <div
+                key={turn.id || idx}
+                className={`turn-accordion-item ${isExpanded ? 'is-expanded' : ''}`}
+              >
+                <div
+                  className="accordion-item-header"
+                  onClick={() => toggleExpand(idx)}
+                >
+                  <div className="item-header-left">
+                    <span className="turn-number-tag">
+                      {turnNum < 10 ? `0${turnNum}` : turnNum}
                     </span>
-                  ))}
+                    <p className="turn-question-title">
+                      {turn.question_text || 'Interview Question'}
+                    </p>
+                  </div>
+
+                  <div className="item-header-right">
+                    <span className="turn-score-badge">Score: {scoreDisplay}</span>
+                    <button
+                      type="button"
+                      className="accordion-arrow-btn"
+                      aria-label={isExpanded ? 'Collapse turn' : 'Expand turn'}
+                    >
+                      {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                    </button>
+                  </div>
                 </div>
+
+                {isExpanded && (
+                  <div className="accordion-item-body">
+                    {/* Side-by-Side Candidate vs Benchmark */}
+                    <div className="qa-comparison-grid">
+                      <div className="qa-card candidate-response-card">
+                        <div className="qa-card-header">
+                          <MessageSquare size={14} className="text-accent-cyan" />
+                          <span>CANDIDATE RESPONSE</span>
+                        </div>
+                        <p className="qa-text">
+                          &ldquo;{turn.candidate_answer || 'Not available'}&rdquo;
+                        </p>
+                      </div>
+
+                      <div className="qa-card benchmark-response-card">
+                        <div className="qa-card-header">
+                          <Sparkles size={14} className="text-accent-violet" />
+                          <span>SENIOR BENCHMARK</span>
+                        </div>
+                        <p className="qa-text">
+                          {turn.ideal_answer || 'Not available'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Turn Feedback / Comparison Takeaway */}
+                    {(turn.turn_feedback || turn.ideal_answer_comparison) && (
+                      <div
+                        className="turn-feedback-callout"
+                        style={{
+                          margin: 'var(--space-sm) 0',
+                          padding: 'var(--space-sm) var(--space-md)',
+                          background: 'rgba(255, 255, 255, 0.02)',
+                          borderRadius: 'var(--radius-sm)',
+                          border: '1px solid var(--border)',
+                          fontSize: 'var(--text-xs)',
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        {turn.turn_feedback && (
+                          <p style={{ margin: 0, color: 'var(--text-secondary)' }}>
+                            <strong style={{ color: 'var(--text-primary)' }}>Turn Takeaway: </strong>
+                            {turn.turn_feedback}
+                          </p>
+                        )}
+                        {turn.ideal_answer_comparison && (
+                          <p
+                            style={{
+                              margin: 0,
+                              marginTop: turn.turn_feedback ? 'var(--space-2xs)' : 0,
+                              color: 'var(--text-secondary)',
+                            }}
+                          >
+                            <strong style={{ color: 'var(--text-primary)' }}>Benchmark Gap: </strong>
+                            {turn.ideal_answer_comparison}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Concept Coverage & Filler Words */}
+                    <div className="turn-meta-matrix">
+                      {coveredList.length > 0 && (
+                        <div className="concept-row">
+                          <span className="meta-row-label">Key Concepts Covered:</span>
+                          <div className="concept-tags">
+                            {coveredList.map((c, cIdx) => (
+                              <span key={cIdx} className="concept-tag covered">
+                                <Check size={11} /> {c}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {missedList.length > 0 && (
+                        <div className="concept-row">
+                          <span className="meta-row-label">Missed Gaps:</span>
+                          <div className="concept-tags">
+                            {missedList.map((m, mIdx) => (
+                              <span key={mIdx} className="concept-tag missed">
+                                <X size={11} /> {m}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {(duration !== undefined || fillerCount !== undefined) && (
+                        <div className="turn-runtime-metrics">
+                          {duration !== undefined && duration !== null && (
+                            <span className="runtime-metric">
+                              <Clock size={13} /> {duration}s
+                            </span>
+                          )}
+                          {fillerCount !== undefined && fillerCount !== null && (
+                            <span className="runtime-metric">
+                              Filler Words: {fillerCount}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-
-            {missed_concepts && missed_concepts.length > 0 && (
-              <div className="concept-group">
-                <span className="concept-group-label">Missed Gaps:</span>
-                <div className="concept-pills">
-                  {missed_concepts.map((m, i) => (
-                    <span key={`missed-${i}`} className="concept-pill missed">
-                      <X size={12} style={{ display: "inline", marginRight: "4px" }} />
-                      {m}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Mini Turn Dimensions Grid */}
-          <div className="turn-mini-dimensions-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "0.5rem" }}>
-            <div className="mini-dim-card" style={{ background: "rgba(15, 23, 42, 0.4)", padding: "0.5rem 0.75rem", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.06)" }}>
-              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block" }}>Relevance</span>
-              <span style={{ fontSize: "0.95rem", fontWeight: 700, color: getScoreColor(relevance_score), fontFamily: "var(--font-mono)" }}>{relevance_score}%</span>
-            </div>
-            <div className="mini-dim-card" style={{ background: "rgba(15, 23, 42, 0.4)", padding: "0.5rem 0.75rem", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.06)" }}>
-              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block" }}>Correctness</span>
-              <span style={{ fontSize: "0.95rem", fontWeight: 700, color: getScoreColor(correctness_score), fontFamily: "var(--font-mono)" }}>{correctness_score}%</span>
-            </div>
-            <div className="mini-dim-card" style={{ background: "rgba(15, 23, 42, 0.4)", padding: "0.5rem 0.75rem", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.06)" }}>
-              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block" }}>Keywords</span>
-              <span style={{ fontSize: "0.95rem", fontWeight: 700, color: getScoreColor(keywords_score), fontFamily: "var(--font-mono)" }}>{keywords_score}%</span>
-            </div>
-            <div className="mini-dim-card" style={{ background: "rgba(15, 23, 42, 0.4)", padding: "0.5rem 0.75rem", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.06)" }}>
-              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block" }}>Clarity</span>
-              <span style={{ fontSize: "0.95rem", fontWeight: 700, color: getScoreColor(clarity_score), fontFamily: "var(--font-mono)" }}>{clarity_score}%</span>
-            </div>
-            <div className="mini-dim-card" style={{ background: "rgba(15, 23, 42, 0.4)", padding: "0.5rem 0.75rem", borderRadius: "6px", border: "1px solid rgba(255,255,255,0.06)" }}>
-              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "block" }}>Confidence</span>
-              <span style={{ fontSize: "0.95rem", fontWeight: 700, color: getScoreColor(confidence_score), fontFamily: "var(--font-mono)" }}>{confidence_score}%</span>
-            </div>
-          </div>
-
-          {/* Speech Stats & Duration */}
-          <div className="turn-speech-stats">
-            {turn_duration_sec && (
-              <div className="speech-stat-item">
-                <Clock size={14} />
-                <span>Duration: <strong className="stat-val">{turn_duration_sec}s</strong></span>
-              </div>
-            )}
-
-            {fillerStats && (
-              <>
-                <div className="speech-stat-item">
-                  <Mic size={14} />
-                  <span>Filler Words: <strong className="stat-val">{fillerStats.count || 0}</strong></span>
-                </div>
-                <div className="speech-stat-item">
-                  <span>Filler Density: <strong className="stat-val">{fillerStats.density || 0}%</strong></span>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Constructive Takeaway Banner */}
-          {turn_feedback && (
-            <div className="turn-feedback-takeaway" style={{ borderLeftColor: "#10b981", background: "rgba(16, 185, 129, 0.08)", color: "#a7f3d0" }}>
-              <strong>Takeaway Feedback: </strong>
-              {turn_feedback}
-            </div>
-          )}
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
-export default function TurnAccordion({ turnsEvaluation = [] }) {
-  if (!turnsEvaluation || turnsEvaluation.length === 0) {
-    return (
-      <div className="turn-accordion-section">
-        <h3 className="card-title">Turn-by-Turn Question Breakdown</h3>
-        <p className="empty-insight">No turn evaluations recorded for this session.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="turn-accordion-section">
-      <div className="card-header-simple">
-        <h3 className="card-title">Turn-by-Turn Detailed Review</h3>
-        <p className="card-subtitle">
-          Expand each question to inspect ideal answers, concept matrices, mini scores, and hesitation metrics.
-        </p>
-      </div>
-
-      <div className="turn-accordion-list">
-        {turnsEvaluation.map((turn, idx) => (
-          <TurnCard
-            key={`turn-card-${turn.id || idx}`}
-            turn={turn}
-            defaultExpanded={idx === 0}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
+export default TurnAccordion;
