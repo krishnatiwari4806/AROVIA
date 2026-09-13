@@ -117,18 +117,20 @@ async def test_evaluate_session_endpoint_success(
         assert start_res.status_code == 200
         turn0_id = start_res.json()["id"]
 
-    # 4. Answer Turn 0
+    # 4. Answer Turn 0, 1, and 2 to complete all 3 quick-mode core questions
     with patch(
         "app.services.gemini_service.GeminiService.evaluate_and_generate_next_turn",
         new_callable=AsyncMock,
     ) as mock_next:
         mock_next.return_value = NextTurnDecision(
             is_follow_up=False,
-            is_interview_complete=True,
-            question_text=None,
-            follow_up_reasoning="Candidate answered thoroughly.",
+            is_interview_complete=False,
+            question_text="How do you handle transactions across microservices?",
+            ideal_answer="Saga pattern with compensating transactions.",
+            primary_concept="Distributed Transactions",
+            follow_up_reasoning="Good answer, moving to next core competency.",
         )
-        ans_res = await client.post(
+        ans0 = await client.post(
             f"/api/v1/interviews/sessions/{session_id}/turns/{turn0_id}/answer",
             json={
                 "candidate_answer": "We use connection pooling with asyncpg and bulk inserts for high throughput writes.",
@@ -136,8 +138,33 @@ async def test_evaluate_session_endpoint_success(
             },
             headers=headers,
         )
-        assert ans_res.status_code == 200
-        assert ans_res.json()["is_interview_complete"] is True
+        assert ans0.status_code == 200
+        assert ans0.json()["is_interview_complete"] is False
+        turn1_id = ans0.json()["next_turn"]["id"]
+
+        ans1 = await client.post(
+            f"/api/v1/interviews/sessions/{session_id}/turns/{turn1_id}/answer",
+            json={
+                "candidate_answer": "We use choreography-based Sagas with RabbitMQ message queues.",
+                "turn_duration_sec": 60,
+            },
+            headers=headers,
+        )
+        assert ans1.status_code == 200
+        assert ans1.json()["is_interview_complete"] is False
+        turn2_id = ans1.json()["next_turn"]["id"]
+
+        # Final core question answer completes the session
+        ans2 = await client.post(
+            f"/api/v1/interviews/sessions/{session_id}/turns/{turn2_id}/answer",
+            json={
+                "candidate_answer": "We implement distributed tracing with OpenTelemetry to track requests.",
+                "turn_duration_sec": 50,
+            },
+            headers=headers,
+        )
+        assert ans2.status_code == 200
+        assert ans2.json()["is_interview_complete"] is True
 
     # 5. Evaluate the completed interview session
     eval_res = await client.post(
