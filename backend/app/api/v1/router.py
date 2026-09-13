@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, coach, health, interviews, resumes
+from app.api.v1.endpoints import auth, coach, health, interviews, progress, resumes
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["Health"])
@@ -12,4 +12,6 @@ api_router.include_router(
     interviews.router, prefix="/interviews", tags=["Interviews"]
 )
 api_router.include_router(coach.router, prefix="/coach", tags=["Coach"])
+api_router.include_router(progress.router, prefix="/progress", tags=["Progress"])
+
 
