@@ -11,7 +11,9 @@ export function StatsOverview({ stats, sessionCount = 0, averageScore = null }) 
   const numScore = typeof rawScore === 'number' ? rawScore : null;
   const totalCount = stats?.totalSessions ?? sessionCount ?? 0;
   const clarityVal = typeof stats?.clarityScore === 'number' ? stats.clarityScore : null;
-  const logicVal = typeof stats?.logicScore === 'number' ? stats.logicScore : null;
+  const confidenceVal = typeof stats?.confidenceScore === 'number' ? stats.confidenceScore : null;
+  const trendDirection = stats?.trendDirection || (totalCount > 0 ? 'Baseline' : 'Insufficient Data');
+  const consistencyRating = stats?.consistencyRating;
 
   // SVG Circular Gauge calculations
   const radius = 38;
@@ -58,10 +60,14 @@ export function StatsOverview({ stats, sessionCount = 0, averageScore = null }) 
 
           <div className="stat-index-details">
             <span className="index-rank-badge">
-              {numScore !== null ? 'Calibrated Readiness' : 'Awaiting Practice'}
+              {numScore !== null
+                ? consistencyRating || (trendDirection !== 'Insufficient Data' ? `${trendDirection} Trajectory` : 'Calibrated Score')
+                : 'Awaiting Practice'}
             </span>
             <p className="index-desc">
-              {numScore !== null ? 'Consistent Evaluation Standard' : 'Complete a session to compute index'}
+              {numScore !== null
+                ? stats?.consistencyDescription || 'Authoritative multi-dimensional evaluation standard'
+                : 'Complete a session to compute index'}
             </p>
           </div>
         </div>
@@ -105,17 +111,17 @@ export function StatsOverview({ stats, sessionCount = 0, averageScore = null }) 
 
         <div className="clarity-metric-row">
           <span className="clarity-tier-badge">
-            {clarityVal !== null ? 'Active Metrics' : 'Uncalibrated'}
+            {clarityVal !== null || confidenceVal !== null ? 'Calibrated Dimensions' : 'Uncalibrated'}
           </span>
           <span className="clarity-status-tag">
-            {clarityVal !== null ? 'Multi-Dimensional' : 'Pending Evaluation'}
+            {clarityVal !== null || confidenceVal !== null ? 'Backend Evaluated' : 'Pending Evaluation'}
           </span>
         </div>
 
         <div className="dual-progress-bars">
           <div className="bar-item">
             <div className="bar-item-labels">
-              <span>Articulation Clarity</span>
+              <span>Clarity</span>
               <span>{clarityVal !== null ? `${clarityVal}%` : '—'}</span>
             </div>
             <div className="progress-track">
@@ -128,13 +134,13 @@ export function StatsOverview({ stats, sessionCount = 0, averageScore = null }) 
 
           <div className="bar-item">
             <div className="bar-item-labels">
-              <span>Technical Depth</span>
-              <span>{logicVal !== null ? `${logicVal}%` : '—'}</span>
+              <span>Confidence</span>
+              <span>{confidenceVal !== null ? `${confidenceVal}%` : '—'}</span>
             </div>
             <div className="progress-track">
               <div
                 className="progress-fill violet-grad"
-                style={{ width: `${logicVal || 0}%` }}
+                style={{ width: `${confidenceVal || 0}%` }}
               />
             </div>
           </div>
