@@ -122,8 +122,64 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
         turn_duration_sec: Math.max(1, elapsedDurationSec || 0),
       };
 
-      // Real API Submission - no synthetic fallback questions on failure
-      const nextTurnResult = await api.submitTurnAnswer(sessionId, currentTurn.id, payload);
+      // Real API Submission with graceful retry reconciliation
+      let nextTurnResult;
+      try {
+        nextTurnResult = await api.submitTurnAnswer(sessionId, currentTurn.id, payload);
+      } catch (submitErr) {
+        const isAlreadyAnswered =
+          submitErr?.code === 'TURN_ALREADY_ANSWERED' ||
+          submitErr?.message?.toLowerCase().includes('already been answered');
+        const isNetworkErr =
+          submitErr?.code === 'NETWORK_ERROR' ||
+          submitErr?.status === 0 ||
+          submitErr?.message?.toLowerCase().includes('network') ||
+          submitErr?.message?.toLowerCase().includes('failed to fetch');
+
+        if (isAlreadyAnswered || isNetworkErr) {
+          // Reconcile server state without blindly resubmitting
+          try {
+            const sess = await api.getSession(sessionId);
+            if (sess && (sess.status === 'evaluating' || sess.status === 'completed')) {
+              const evalReport = await api.evaluateSession(sessionId);
+              setIsCompleted(true);
+              onComplete?.(evalReport);
+              return;
+            }
+
+            const activeTurn = await api.getCurrentTurn(sessionId);
+            if (activeTurn && activeTurn.id !== currentTurn.id) {
+              // Turn was advanced on server: recover silently
+              setCurrentTurn(activeTurn);
+              setCandidateAnswer('');
+              setElapsedDurationSec(0);
+              setError(null);
+
+              const settings = getAroviaSettings();
+              const autoPlay = settings.languageVoice?.autoPlayQuestions !== false;
+              if (activeTurn.question_text && autoPlay) {
+                speak(activeTurn.question_text);
+              }
+              return;
+            } else if (activeTurn && activeTurn.id === currentTurn.id) {
+              // Server still awaits this turn answer: preserve draft and prompt user to click submit
+              setError(
+                'Submission was interrupted before reaching the server. Your answer has been preserved. Please click Submit Response again.'
+              );
+              return;
+            }
+          } catch (reconcileErr) {
+            console.error('State reconciliation failed:', reconcileErr);
+            setError(
+              submitErr?.message ||
+                'Connection issue: Unable to confirm submission status. Your answer is preserved; please check your network and retry.'
+            );
+            return;
+          }
+        }
+
+        throw submitErr;
+      }
 
       if (nextTurnResult?.is_interview_complete) {
         // Evaluate session upon completing all planned questions
