@@ -226,17 +226,34 @@ async def test_session_completion_transition(
     )
     turn0_id = start_res.json()["id"]
 
-    # Submit answer
-    answer_res = await client.post(
+    # Answer Turn 0 (Core 1)
+    ans0 = await client.post(
         f"/api/v1/interviews/sessions/{session_id}/turns/{turn0_id}/answer",
-        json={
-            "candidate_answer": "In Flutter we use BLoC for state management and streams for reactive UI updates.",
-            "turn_duration_sec": 60,
-        },
+        json={"candidate_answer": "In Flutter we use BLoC for state management.", "turn_duration_sec": 60},
         headers=headers,
     )
-    assert answer_res.status_code == 200
-    ans_data = answer_res.json()
+    assert ans0.status_code == 200
+    assert ans0.json()["is_interview_complete"] is False
+    turn1_id = ans0.json()["next_turn"]["id"]
+
+    # Answer Turn 1 (Core 2)
+    ans1 = await client.post(
+        f"/api/v1/interviews/sessions/{session_id}/turns/{turn1_id}/answer",
+        json={"candidate_answer": "We use SQLite and Room for local offline storage.", "turn_duration_sec": 60},
+        headers=headers,
+    )
+    assert ans1.status_code == 200
+    assert ans1.json()["is_interview_complete"] is False
+    turn2_id = ans1.json()["next_turn"]["id"]
+
+    # Answer Turn 2 (Core 3, planned_core=3 exhausted -> Legitimate completion)
+    ans2 = await client.post(
+        f"/api/v1/interviews/sessions/{session_id}/turns/{turn2_id}/answer",
+        json={"candidate_answer": "We use platform channels and FFI for native interop.", "turn_duration_sec": 60},
+        headers=headers,
+    )
+    assert ans2.status_code == 200
+    ans_data = ans2.json()
     assert ans_data["is_interview_complete"] is True
     assert ans_data["session_status"] == "evaluating"
     assert ans_data["next_turn"] is None
@@ -249,3 +266,515 @@ async def test_session_completion_transition(
     assert session_res.status_code == 200
     assert session_res.json()["status"] == "evaluating"
     assert session_res.json()["completed_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_scenario_a_quick_no_followup_deterministic_completion(
+    client: AsyncClient, mock_gemini_turn_engine
+):
+    """Scenario A: 3 core answers, 0 follow-ups -> completes after 3rd core answer without 4th question."""
+    reg_res = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "scen_a@example.com", "password": "StrongPassword!123", "full_name": "Scenario A"},
+    )
+    headers = {"Authorization": f"Bearer {reg_res.json()['access_token']}"}
+    mock_initial, mock_next = mock_gemini_turn_engine
+
+    # Gemini tries to always return more core questions (is_interview_complete=False)
+    mock_next.return_value = NextTurnDecision(
+        is_follow_up=False,
+        question_text="Tell me more about indexing.",
+        ideal_answer="B-trees and hash indexes.",
+        primary_concept="Database Indexing",
+        is_interview_complete=False,
+    )
+
+    create_res = await client.post(
+        "/api/v1/interviews/sessions",
+        json={"target_role": "Backend Engineer", "seniority_level": "mid", "interview_focus": "Technical Core", "practice_mode": "quick"},
+        headers=headers,
+    )
+    session_id = create_res.json()["id"]
+    t0_id = (await client.post(f"/api/v1/interviews/sessions/{session_id}/start", headers=headers)).json()["id"]
+
+    # Turn 0 (Core 1) answered -> Returns Turn 1 (Core 2)
+    ans1 = await client.post(f"/api/v1/interviews/sessions/{session_id}/turns/{t0_id}/answer", json={"candidate_answer": "Answer 1"}, headers=headers)
+    assert ans1.status_code == 200
+    assert ans1.json()["is_interview_complete"] is False
+    t1_id = ans1.json()["next_turn"]["id"]
+    assert ans1.json()["next_turn"]["is_follow_up"] is False
+
+    # Turn 1 (Core 2) answered -> Returns Turn 2 (Core 3)
+    ans2 = await client.post(f"/api/v1/interviews/sessions/{session_id}/turns/{t1_id}/answer", json={"candidate_answer": "Answer 2"}, headers=headers)
+    assert ans2.status_code == 200
+    assert ans2.json()["is_interview_complete"] is False
+    t2_id = ans2.json()["next_turn"]["id"]
+    assert ans2.json()["next_turn"]["is_follow_up"] is False
+
+    # Turn 2 (Core 3) answered -> Must complete deterministically (planned_core_questions=3 exhausted)
+    ans3 = await client.post(f"/api/v1/interviews/sessions/{session_id}/turns/{t2_id}/answer", json={"candidate_answer": "Answer 3"}, headers=headers)
+    assert ans3.status_code == 200
+    assert ans3.json()["is_interview_complete"] is True
+    assert ans3.json()["next_turn"] is None
+    assert ans3.json()["session_status"] == "evaluating"
+
+
+@pytest.mark.asyncio
+async def test_scenario_b_and_c_followup_must_not_chain(
+    client: AsyncClient, mock_gemini_turn_engine
+):
+    """Scenarios B & C: Core 1 -> Follow-up -> Follow-up cannot chain -> moves to Core 2."""
+    reg_res = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "scen_bc@example.com", "password": "StrongPassword!123", "full_name": "Scenario BC"},
+    )
+    headers = {"Authorization": f"Bearer {reg_res.json()['access_token']}"}
+    mock_initial, mock_next = mock_gemini_turn_engine
+
+    # Step 1: Recommend follow-up for Turn 0
+    mock_next.return_value = NextTurnDecision(
+        is_follow_up=True,
+        question_text="Probe 1: explain memory allocation.",
+        ideal_answer="Heap vs stack.",
+        primary_concept="Memory",
+        is_interview_complete=False,
+    )
+
+    create_res = await client.post(
+        "/api/v1/interviews/sessions",
+        json={"target_role": "Backend Engineer", "seniority_level": "mid", "interview_focus": "Technical Core", "practice_mode": "quick"},
+        headers=headers,
+    )
+    session_id = create_res.json()["id"]
+    t0_id = (await client.post(f"/api/v1/interviews/sessions/{session_id}/start", headers=headers)).json()["id"]
+
+    # Answer Core 1 -> Receives Follow-up 1
+    ans1 = await client.post(f"/api/v1/interviews/sessions/{session_id}/turns/{t0_id}/answer", json={"candidate_answer": "Shallow answer"}, headers=headers)
+    assert ans1.status_code == 200
+    assert ans1.json()["next_turn"]["is_follow_up"] is True
+    assert ans1.json()["next_turn"]["parent_turn_id"] == t0_id
+    t1_followup_id = ans1.json()["next_turn"]["id"]
+
+    # Step 2: Answer Follow-up 1. Even if Gemini attempts is_follow_up=True again, backend must force Core 2!
+    mock_next.return_value = NextTurnDecision(
+        is_follow_up=True,
+        question_text="Probe 2: explain garbage collection.",
+        ideal_answer="Reference counting & cyclic GC.",
+        primary_concept="GC",
+        is_interview_complete=False,
+    )
+
+    ans2 = await client.post(f"/api/v1/interviews/sessions/{session_id}/turns/{t1_followup_id}/answer", json={"candidate_answer": "Follow-up answer"}, headers=headers)
+    assert ans2.status_code == 200
+    assert ans2.json()["is_interview_complete"] is False
+    assert ans2.json()["next_turn"]["is_follow_up"] is False  # Clamped to core question
+    assert ans2.json()["next_turn"]["parent_turn_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_scenario_d_and_e_budget_exhaustion_and_max_boundary(
+    client: AsyncClient, mock_gemini_turn_engine
+):
+    """Scenarios D & E: Quick mode (planned_core=3, max_turns=5). 2 follow-ups exhaust budget -> 5th turn triggers max total boundary."""
+    reg_res = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "scen_de@example.com", "password": "StrongPassword!123", "full_name": "Scenario DE"},
+    )
+    headers = {"Authorization": f"Bearer {reg_res.json()['access_token']}"}
+    mock_initial, mock_next = mock_gemini_turn_engine
+
+    create_res = await client.post(
+        "/api/v1/interviews/sessions",
+        json={"target_role": "Backend Engineer", "seniority_level": "mid", "interview_focus": "Technical Core", "practice_mode": "quick"},
+        headers=headers,
+    )
+    session_id = create_res.json()["id"]
+    t0_id = (await client.post(f"/api/v1/interviews/sessions/{session_id}/start", headers=headers)).json()["id"]
+
+    # Turn 0 (Core 1) -> Follow-up 1
+    mock_next.return_value = NextTurnDecision(is_follow_up=True, question_text="Follow-up 1", ideal_answer="Ans", primary_concept="C1")
+    t1_id = (await client.post(f"/api/v1/interviews/sessions/{session_id}/turns/{t0_id}/answer", json={"candidate_answer": "Ans 0"}, headers=headers)).json()["next_turn"]["id"]
+
+    # Turn 1 (Follow-up 1) -> Core 2
+    mock_next.return_value = NextTurnDecision(is_follow_up=False, question_text="Core 2", ideal_answer="Ans", primary_concept="C2")
+    t2_id = (await client.post(f"/api/v1/interviews/sessions/{session_id}/turns/{t1_id}/answer", json={"candidate_answer": "Ans 1"}, headers=headers)).json()["next_turn"]["id"]
+
+    # Turn 2 (Core 2) -> Follow-up 2 (Budget of 2 follow-ups now used up)
+    mock_next.return_value = NextTurnDecision(is_follow_up=True, question_text="Follow-up 2", ideal_answer="Ans", primary_concept="C3")
+    t3_id = (await client.post(f"/api/v1/interviews/sessions/{session_id}/turns/{t2_id}/answer", json={"candidate_answer": "Ans 2"}, headers=headers)).json()["next_turn"]["id"]
+
+    # Turn 3 (Follow-up 2) -> Core 3
+    mock_next.return_value = NextTurnDecision(is_follow_up=False, question_text="Core 3", ideal_answer="Ans", primary_concept="C4")
+    t4_id = (await client.post(f"/api/v1/interviews/sessions/{session_id}/turns/{t3_id}/answer", json={"candidate_answer": "Ans 3"}, headers=headers)).json()["next_turn"]["id"]
+
+    # Turn 4 (Core 3, total_turns=5 = max_total_turns) -> Must complete
+    ans5 = await client.post(f"/api/v1/interviews/sessions/{session_id}/turns/{t4_id}/answer", json={"candidate_answer": "Ans 4"}, headers=headers)
+    assert ans5.status_code == 200
+    assert ans5.json()["is_interview_complete"] is True
+    assert ans5.json()["next_turn"] is None
+    assert ans5.json()["session_status"] == "evaluating"
+
+
+@pytest.mark.asyncio
+async def test_scenario_f_full_mode_core_budget_respected(
+    client: AsyncClient, mock_gemini_turn_engine
+):
+    """Scenario F: Full mode (planned_core=6). 6 core answers with 0 follow-ups complete cleanly without 7th question."""
+    reg_res = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "scen_f@example.com", "password": "StrongPassword!123", "full_name": "Scenario F"},
+    )
+    headers = {"Authorization": f"Bearer {reg_res.json()['access_token']}"}
+    mock_initial, mock_next = mock_gemini_turn_engine
+
+    mock_next.return_value = NextTurnDecision(
+        is_follow_up=False,
+        question_text="Core topic question",
+        ideal_answer="Benchmark answer",
+        primary_concept="Core Topic",
+        is_interview_complete=False,
+    )
+
+    create_res = await client.post(
+        "/api/v1/interviews/sessions",
+        json={"target_role": "Backend Engineer", "seniority_level": "senior", "interview_focus": "Technical Core", "practice_mode": "full"},
+        headers=headers,
+    )
+    session_id = create_res.json()["id"]
+    current_turn_id = (await client.post(f"/api/v1/interviews/sessions/{session_id}/start", headers=headers)).json()["id"]
+
+    for i in range(5):
+        ans_res = await client.post(
+            f"/api/v1/interviews/sessions/{session_id}/turns/{current_turn_id}/answer",
+            json={"candidate_answer": f"Core answer {i + 1}"},
+            headers=headers,
+        )
+        assert ans_res.status_code == 200
+        assert ans_res.json()["is_interview_complete"] is False
+        current_turn_id = ans_res.json()["next_turn"]["id"]
+
+    # 6th Core answer (Turn 5) -> Must complete
+    final_res = await client.post(
+        f"/api/v1/interviews/sessions/{session_id}/turns/{current_turn_id}/answer",
+        json={"candidate_answer": "Core answer 6"},
+        headers=headers,
+    )
+    assert final_res.status_code == 200
+    assert final_res.json()["is_interview_complete"] is True
+    assert final_res.json()["next_turn"] is None
+    assert final_res.json()["session_status"] == "evaluating"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_gemini_question_rejected_and_replaced_with_fallback(
+    client: AsyncClient, mock_gemini_turn_engine
+):
+    """Test 2 (Step 5C): If Gemini generates an exact normalized duplicate of a prior turn, reject and use Question Bank."""
+    reg_res = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "dedup_test@example.com", "password": "StrongPassword!123", "full_name": "Dedup Test"},
+    )
+    headers = {"Authorization": f"Bearer {reg_res.json()['access_token']}"}
+    mock_initial, mock_next = mock_gemini_turn_engine
+
+    # Turn 0 question
+    mock_initial.return_value = GeneratedQuestion(
+        question_text="What is REST and how does it work?",
+        ideal_answer="REST is representational state transfer with stateless HTTP methods.",
+        primary_concept="REST Fundamentals",
+    )
+
+    create_res = await client.post(
+        "/api/v1/interviews/sessions",
+        json={"target_role": "Backend Engineer", "seniority_level": "mid", "interview_focus": "Technical Core", "practice_mode": "quick"},
+        headers=headers,
+    )
+    session_id = create_res.json()["id"]
+    turn0_id = (await client.post(f"/api/v1/interviews/sessions/{session_id}/start", headers=headers)).json()["id"]
+
+    # Mock Gemini on Turn 1 to return an exact normalized duplicate of Turn 0 with different casing and whitespace
+    mock_next.return_value = NextTurnDecision(
+        is_follow_up=False,
+        question_text="   what IS rest and how does it work?   ",
+        ideal_answer="Duplicate ideal answer",
+        primary_concept="REST Fundamentals",
+        is_interview_complete=False,
+    )
+
+    ans_res = await client.post(
+        f"/api/v1/interviews/sessions/{session_id}/turns/{turn0_id}/answer",
+        json={"candidate_answer": "REST stands for REpresentational State Transfer."},
+        headers=headers,
+    )
+    assert ans_res.status_code == 200
+    res_data = ans_res.json()
+    assert res_data["is_interview_complete"] is False
+    next_turn = res_data["next_turn"]
+    assert next_turn is not None
+
+    # Verify that the duplicate text was REJECTED and replaced with a Question Bank fallback
+    assert "what IS rest and how does it work?" not in next_turn["question_text"]
+    assert next_turn["question_type"] == "core"
+    assert len(next_turn["question_text"]) > 15
+
+
+@pytest.mark.asyncio
+async def test_premature_completion_overridden_when_core_remains(
+    client: AsyncClient, mock_gemini_turn_engine
+):
+    """Test 1 (Step 5C): If Gemini returns is_interview_complete=True on Turn 1 while core remains, override with fallback."""
+    reg_res = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "premature_test@example.com", "password": "StrongPassword!123", "full_name": "Premature Test"},
+    )
+    headers = {"Authorization": f"Bearer {reg_res.json()['access_token']}"}
+    mock_initial, mock_next = mock_gemini_turn_engine
+
+    create_res = await client.post(
+        "/api/v1/interviews/sessions",
+        json={"target_role": "Backend Engineer", "seniority_level": "mid", "interview_focus": "Technical Core", "practice_mode": "quick"},
+        headers=headers,
+    )
+    session_id = create_res.json()["id"]
+    turn0_id = (await client.post(f"/api/v1/interviews/sessions/{session_id}/start", headers=headers)).json()["id"]
+
+    # Mock Gemini to return premature completion with no question_text on Turn 1
+    mock_next.return_value = NextTurnDecision(
+        is_follow_up=False,
+        question_text=None,
+        ideal_answer=None,
+        primary_concept=None,
+        is_interview_complete=True,
+    )
+
+    ans_res = await client.post(
+        f"/api/v1/interviews/sessions/{session_id}/turns/{turn0_id}/answer",
+        json={"candidate_answer": "Solid explanation of backend services."},
+        headers=headers,
+    )
+    assert ans_res.status_code == 200
+    res_data = ans_res.json()
+
+    # Must NOT complete prematurely! 2 core questions still remain
+    assert res_data["is_interview_complete"] is False
+    assert res_data["session_status"] == "in_progress"
+    assert res_data["next_turn"] is not None
+    assert len(res_data["next_turn"]["question_text"]) > 10
+
+
+@pytest.mark.asyncio
+async def test_idempotent_identical_answer_retry_returns_existing_next_turn(
+    client: AsyncClient, mock_gemini_turn_engine
+):
+    """TEST A (Step 7A): Submitting identical answer retry returns existing next turn without re-running Gemini or creating turns."""
+    reg_res = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "idempotent_retry@example.com", "password": "StrongPassword!123", "full_name": "Idempotent Retry"},
+    )
+    headers = {"Authorization": f"Bearer {reg_res.json()['access_token']}"}
+    mock_initial, mock_next = mock_gemini_turn_engine
+
+    create_res = await client.post(
+        "/api/v1/interviews/sessions",
+        json={"target_role": "Backend Engineer", "seniority_level": "senior", "interview_focus": "Technical Core", "practice_mode": "quick"},
+        headers=headers,
+    )
+    session_id = create_res.json()["id"]
+    turn0_id = (await client.post(f"/api/v1/interviews/sessions/{session_id}/start", headers=headers)).json()["id"]
+
+    mock_next.return_value = NextTurnDecision(
+        is_follow_up=False,
+        question_text="Describe how you design distributed locks with Redis.",
+        ideal_answer="Redlock algorithm with TTL and clock drift protection.",
+        primary_concept="Distributed Locking",
+        is_interview_complete=False,
+    )
+
+    # 1. First submission
+    ans1_res = await client.post(
+        f"/api/v1/interviews/sessions/{session_id}/turns/{turn0_id}/answer",
+        json={"candidate_answer": "I use Redis for distributed caching with TTL expiration policies.", "turn_duration_sec": 45},
+        headers=headers,
+    )
+    assert ans1_res.status_code == 200
+    turn1_data = ans1_res.json()
+    assert turn1_data["is_interview_complete"] is False
+    assert turn1_data["next_turn"]["turn_index"] == 1
+    turn1_id = turn1_data["next_turn"]["id"]
+    call_count_before = mock_next.call_count
+
+    # 2. Idempotent retry with surrounding/repeated whitespace variation
+    ans2_res = await client.post(
+        f"/api/v1/interviews/sessions/{session_id}/turns/{turn0_id}/answer",
+        json={"candidate_answer": "   I use Redis   for distributed caching with TTL expiration policies.   ", "turn_duration_sec": 45},
+        headers=headers,
+    )
+    assert ans2_res.status_code == 200
+    retry_data = ans2_res.json()
+    assert retry_data["is_interview_complete"] is False
+    assert retry_data["next_turn"]["id"] == turn1_id
+    assert retry_data["next_turn"]["turn_index"] == 1
+
+    # Verify Gemini was NOT called a second time
+    assert mock_next.call_count == call_count_before
+
+    # Verify session only has 2 turns total in history
+    history_res = await client.get(f"/api/v1/interviews/sessions/{session_id}/turns", headers=headers)
+    assert history_res.status_code == 200
+    assert len(history_res.json()) == 2
+
+
+@pytest.mark.asyncio
+async def test_conflicting_answer_retry_rejected_with_turn_already_answered(
+    client: AsyncClient, mock_gemini_turn_engine
+):
+    """TEST B (Step 7A): Re-submitting a materially different answer on an answered turn is rejected with TURN_ALREADY_ANSWERED."""
+    reg_res = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "conflict_retry@example.com", "password": "StrongPassword!123", "full_name": "Conflict Retry"},
+    )
+    headers = {"Authorization": f"Bearer {reg_res.json()['access_token']}"}
+    mock_initial, mock_next = mock_gemini_turn_engine
+
+    create_res = await client.post(
+        "/api/v1/interviews/sessions",
+        json={"target_role": "Backend Engineer", "seniority_level": "mid", "interview_focus": "Technical Core", "practice_mode": "quick"},
+        headers=headers,
+    )
+    session_id = create_res.json()["id"]
+    turn0_id = (await client.post(f"/api/v1/interviews/sessions/{session_id}/start", headers=headers)).json()["id"]
+
+    # First answer
+    await client.post(
+        f"/api/v1/interviews/sessions/{session_id}/turns/{turn0_id}/answer",
+        json={"candidate_answer": "Original answer regarding database transactions.", "turn_duration_sec": 30},
+        headers=headers,
+    )
+
+    # Conflicting second answer
+    conflict_res = await client.post(
+        f"/api/v1/interviews/sessions/{session_id}/turns/{turn0_id}/answer",
+        json={"candidate_answer": "Completely different text trying to overwrite.", "turn_duration_sec": 30},
+        headers=headers,
+    )
+    assert conflict_res.status_code == 400
+    assert conflict_res.json()["error_code"] == "TURN_ALREADY_ANSWERED"
+    assert "already been answered" in conflict_res.text
+
+    # Verify original answer is untouched in history
+    history_res = await client.get(f"/api/v1/interviews/sessions/{session_id}/turns", headers=headers)
+    turns = history_res.json()
+    assert turns[0]["candidate_answer"] == "Original answer regarding database transactions."
+
+
+@pytest.mark.asyncio
+async def test_completed_session_idempotent_retry_returns_completed_state(
+    client: AsyncClient, mock_gemini_turn_engine
+):
+    """TEST C (Step 7A): Retrying final turn submission on an already completed/evaluating session returns completed state."""
+    reg_res = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "completed_retry@example.com", "password": "StrongPassword!123", "full_name": "Completed Retry"},
+    )
+    headers = {"Authorization": f"Bearer {reg_res.json()['access_token']}"}
+    mock_initial, mock_next = mock_gemini_turn_engine
+
+    mock_next.return_value = NextTurnDecision(
+        is_follow_up=False,
+        question_text="Another question",
+        ideal_answer="Ideal answer",
+        primary_concept="Concept",
+        is_interview_complete=False,
+    )
+
+    create_res = await client.post(
+        "/api/v1/interviews/sessions",
+        json={"target_role": "Backend Engineer", "seniority_level": "mid", "interview_focus": "Technical Core", "practice_mode": "quick"},
+        headers=headers,
+    )
+    session_id = create_res.json()["id"]
+    turn0_id = (await client.post(f"/api/v1/interviews/sessions/{session_id}/start", headers=headers)).json()["id"]
+
+    # Turn 0
+    ans0 = await client.post(
+        f"/api/v1/interviews/sessions/{session_id}/turns/{turn0_id}/answer",
+        json={"candidate_answer": "Answer 0"},
+        headers=headers,
+    )
+    turn1_id = ans0.json()["next_turn"]["id"]
+
+    # Turn 1
+    ans1 = await client.post(
+        f"/api/v1/interviews/sessions/{session_id}/turns/{turn1_id}/answer",
+        json={"candidate_answer": "Answer 1"},
+        headers=headers,
+    )
+    turn2_id = ans1.json()["next_turn"]["id"]
+
+    # Turn 2 (Final core question in quick mode)
+    final_ans = "Final Answer to complete the session"
+    ans2 = await client.post(
+        f"/api/v1/interviews/sessions/{session_id}/turns/{turn2_id}/answer",
+        json={"candidate_answer": final_ans},
+        headers=headers,
+    )
+    assert ans2.status_code == 200
+    assert ans2.json()["is_interview_complete"] is True
+    call_count_at_completion = mock_next.call_count
+
+    # Retry final turn submission
+    retry_res = await client.post(
+        f"/api/v1/interviews/sessions/{session_id}/turns/{turn2_id}/answer",
+        json={"candidate_answer": final_ans},
+        headers=headers,
+    )
+    assert retry_res.status_code == 200
+    retry_data = retry_res.json()
+    assert retry_data["is_interview_complete"] is True
+    assert retry_data["next_turn"] is None
+    assert retry_data["session_status"] == "evaluating"
+
+    # Gemini was not invoked on retry
+    assert mock_next.call_count == call_count_at_completion
+
+
+@pytest.mark.asyncio
+async def test_concurrent_duplicate_turn_submissions_safe(
+    client: AsyncClient, mock_gemini_turn_engine
+):
+    """TEST E (Step 7A): Rapid repeated duplicate submissions of the same turn answer resolve cleanly without locks or duplicate turns."""
+    reg_res = await client.post(
+        "/api/v1/auth/register",
+        json={"email": "concurrent_submit@example.com", "password": "StrongPassword!123", "full_name": "Concurrent Submit"},
+    )
+    headers = {"Authorization": f"Bearer {reg_res.json()['access_token']}"}
+    mock_initial, mock_next = mock_gemini_turn_engine
+
+    create_res = await client.post(
+        "/api/v1/interviews/sessions",
+        json={"target_role": "Backend Engineer", "seniority_level": "senior", "interview_focus": "Technical Core", "practice_mode": "quick"},
+        headers=headers,
+    )
+    session_id = create_res.json()["id"]
+    turn0_id = (await client.post(f"/api/v1/interviews/sessions/{session_id}/start", headers=headers)).json()["id"]
+
+    answer_payload = {"candidate_answer": "I use FastAPI with dependency injection and Pydantic validation.", "turn_duration_sec": 50}
+
+    # Execute 3 rapid successive submissions simulating client retries / double-clicks
+    res1 = await client.post(f"/api/v1/interviews/sessions/{session_id}/turns/{turn0_id}/answer", json=answer_payload, headers=headers)
+    res2 = await client.post(f"/api/v1/interviews/sessions/{session_id}/turns/{turn0_id}/answer", json=answer_payload, headers=headers)
+    res3 = await client.post(f"/api/v1/interviews/sessions/{session_id}/turns/{turn0_id}/answer", json=answer_payload, headers=headers)
+
+    for r in (res1, res2, res3):
+        assert r.status_code == 200
+        assert r.json()["is_interview_complete"] is False
+
+    # All returned the identical next_turn ID
+    next_ids = {r.json()["next_turn"]["id"] for r in (res1, res2, res3)}
+    assert len(next_ids) == 1
+
+    # Exactly 2 turns total in history
+    history_res = await client.get(f"/api/v1/interviews/sessions/{session_id}/turns", headers=headers)
+    assert len(history_res.json()) == 2
+
+
