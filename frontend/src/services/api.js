@@ -142,6 +142,13 @@ export const api = {
   getUserSessions: (limit = 50, offset = 0) =>
     request(`/interviews/sessions?limit=${limit}&offset=${offset}`),
 
+  // Progress Intelligence & Longitudinal Analytics
+  getProgress: (limit = null) => {
+    const query = limit ? `?limit=${limit}` : '';
+    return request(`/progress${query}`);
+  },
+  getProgressInsight: () => request('/progress/insight'),
+
   // Personal AI Coach & Mentorship
   getOrCreateCoachConversation: (sessionId = null, autoDebrief = true) =>
     request('/coach/conversation', {

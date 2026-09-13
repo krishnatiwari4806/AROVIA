@@ -37,6 +37,7 @@ export function App() {
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [selectedReportId, setSelectedReportId] = useState(null);
   const [selectedCoachSessionId, setSelectedCoachSessionId] = useState(null);
+  const [practiceIntent, setPracticeIntent] = useState(null);
 
   // Verify and hydrate authenticated candidate session
   const verifyAuthSession = useCallback(async () => {
@@ -275,8 +276,15 @@ export function App() {
       {/* 1. Interview Setup View */}
       {currentView === 'setup' ? (
         <InterviewSetup
-          onStartInterview={handleStartInterview}
-          onBack={() => setCurrentView('dashboard')}
+          practiceIntent={practiceIntent}
+          onStartInterview={(newSessionId) => {
+            setPracticeIntent(null);
+            handleStartInterview(newSessionId);
+          }}
+          onBack={() => {
+            setPracticeIntent(null);
+            setCurrentView('dashboard');
+          }}
         />
       ) : /* 2. Live Interview Room View */
       currentView === 'interview' && activeSessionId ? (
@@ -304,18 +312,27 @@ export function App() {
           sessionId={selectedCoachSessionId || selectedReportId}
           onBack={() => setCurrentView(selectedReportId ? 'report' : 'dashboard')}
           onViewReport={handleViewReport}
-          onStartSetup={() => setCurrentView('setup')}
+          onStartSetup={(intent = null) => {
+            setPracticeIntent(intent);
+            setCurrentView('setup');
+          }}
         />
       ) : /* 5. Dedicated History View */
       currentView === 'history' ? (
         <HistoryView
           onViewReport={handleViewReport}
-          onStartSetup={() => setCurrentView('setup')}
+          onStartSetup={() => {
+            setPracticeIntent(null);
+            setCurrentView('setup');
+          }}
         />
       ) : /* 6. Dedicated Profile View */
       currentView === 'profile' ? (
         <ProfileView
-          onStartSetup={() => setCurrentView('setup')}
+          onStartSetup={() => {
+            setPracticeIntent(null);
+            setCurrentView('setup');
+          }}
         />
       ) : /* 7. Dedicated Settings View */
       currentView === 'settings' ? (
@@ -326,13 +343,22 @@ export function App() {
       ) : /* 8. Dedicated Help & Support View */
       currentView === 'help' ? (
         <HelpSupportView
-          onStartSetup={() => setCurrentView('setup')}
+          onStartSetup={() => {
+            setPracticeIntent(null);
+            setCurrentView('setup');
+          }}
         />
       ) : /* 9. Candidate Dashboard (Default) */
       (
         <Dashboard
-          onStartInterview={() => setCurrentView('setup')}
-          onOpenSetup={() => setCurrentView('setup')}
+          onStartInterview={() => {
+            setPracticeIntent(null);
+            setCurrentView('setup');
+          }}
+          onOpenSetup={() => {
+            setPracticeIntent(null);
+            setCurrentView('setup');
+          }}
           onResumeActiveSession={handleResumeActive}
           onViewReport={handleViewReport}
         />

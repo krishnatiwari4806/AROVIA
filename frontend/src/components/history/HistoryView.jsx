@@ -1,65 +1,49 @@
 import React, { useState, useEffect } from 'react';
-import { History as HistoryIcon, ArrowRight, Play, Calendar, Award, CheckCircle2, Clock } from 'lucide-react';
+import { History as HistoryIcon, ArrowRight, Play, Calendar, Award, CheckCircle2, Clock, AlertCircle, RefreshCw } from 'lucide-react';
+import { api } from '../../services/api';
 
 /**
  * Dedicated History View Component.
+ * Consumes authoritative backend session archive (`GET /api/v1/interviews/sessions`).
  * Displays real completed mock interview sessions, scorecard archives, and timestamps.
- * Does NOT invent fake scores or mock entries.
+ * Does NOT invent fake scores, mock entries, or rely on localStorage.
  */
 export function HistoryView({ onViewReport, onStartSetup }) {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  async function loadHistory() {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await api.getUserSessions(50, 0);
+      if (Array.isArray(data)) {
+        // Filter strictly completed sessions with valid evaluations
+        const completed = data.filter(
+          (s) => s && s.id && s.status === 'completed' && s.overall_score !== null && s.overall_score !== undefined
+        );
+        setSessions(completed);
+      } else {
+        setSessions([]);
+      }
+    } catch (err) {
+      console.error('Could not read session history from backend:', err);
+      setError(err.message || 'Failed to load session history from backend.');
+      setSessions([]);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    function loadHistory() {
-      try {
-        setLoading(true);
-        const savedHistory = localStorage.getItem('arovia_recent_sessions');
-        if (savedHistory) {
-          const parsed = JSON.parse(savedHistory);
-          if (Array.isArray(parsed)) {
-            // Filter only valid completed sessions and normalize identifier
-            const completed = parsed
-              .filter(
-                (s) => s && (s.session_id || s.id) && s.status === 'completed'
-              )
-              .map((s) => ({
-                ...s,
-                id: s.session_id || s.id,
-                session_id: s.session_id || s.id,
-              }));
-
-            // Deduplicate by primary session_id
-            const uniqueMap = new Map();
-            completed.forEach((s) => {
-              if (!uniqueMap.has(s.id)) {
-                uniqueMap.set(s.id, s);
-              }
-            });
-            setSessions(Array.from(uniqueMap.values()));
-          } else {
-            setSessions([]);
-          }
-        } else {
-          setSessions([]);
-        }
-      } catch (err) {
-        console.warn('Could not read session history:', err);
-        setSessions([]);
-      } finally {
-        setLoading(false);
-      }
-    }
-
     loadHistory();
 
     const handleUpdate = () => loadHistory();
     window.addEventListener('arovia_sessions_updated', handleUpdate);
-    window.addEventListener('storage', handleUpdate);
 
     return () => {
       window.removeEventListener('arovia_sessions_updated', handleUpdate);
-      window.removeEventListener('storage', handleUpdate);
     };
   }, []);
 
@@ -95,6 +79,45 @@ export function HistoryView({ onViewReport, onStartSetup }) {
         </button>
       </div>
 
+      {/* Error Banner */}
+      {error && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: 'var(--space-md)',
+            marginBottom: 'var(--space-md)',
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            borderRadius: 'var(--radius-md)',
+            color: '#f87171',
+            fontSize: 'var(--text-xs)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
+            <AlertCircle size={16} />
+            <span>{error}</span>
+          </div>
+          <button
+            onClick={loadHistory}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              background: 'transparent',
+              border: 'none',
+              color: '#f87171',
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+          >
+            <RefreshCw size={12} />
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* History Session List */}
       <div className="history-content-container">
         {loading ? (
@@ -105,7 +128,7 @@ export function HistoryView({ onViewReport, onStartSetup }) {
         ) : sessions.length === 0 ? (
           <div className="history-empty-state">
             <HistoryIcon size={40} className="text-muted" />
-            <h3 className="empty-title">No Interview Sessions Recorded Yet</h3>
+            <h3 className="empty-title">No Completed Sessions Recorded Yet</h3>
             <p className="empty-desc">
               Complete your first technical or behavioral mock interview to generate
               multi-dimensional performance reports and historical progression records.
@@ -118,7 +141,7 @@ export function HistoryView({ onViewReport, onStartSetup }) {
         ) : (
           <div className="history-sessions-grid">
             {sessions.map((session, idx) => {
-              const targetId = session.session_id || session.id;
+              const targetId = session.id;
               return (
                 <div
                   key={targetId || idx}
@@ -148,8 +171,8 @@ export function HistoryView({ onViewReport, onStartSetup }) {
                     <div className="session-date-info">
                       <Calendar size={13} className="text-muted" />
                       <span>
-                        {session.completed_at
-                          ? new Date(session.completed_at).toLocaleDateString('en-US', {
+                        {session.completed_at || session.started_at
+                          ? new Date(session.completed_at || session.started_at).toLocaleDateString('en-US', {
                               month: 'short',
                               day: 'numeric',
                               year: 'numeric',
@@ -182,3 +205,4 @@ export function HistoryView({ onViewReport, onStartSetup }) {
 }
 
 export default HistoryView;
+

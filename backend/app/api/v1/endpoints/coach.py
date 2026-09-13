@@ -44,7 +44,12 @@ async def get_or_create_coach_conversation(
     Automatically generates an initial mentor debrief if this is a newly opened conversation.
     Strictly verifies user ownership of the interview session.
     """
-    conversation, followups = await coach_service.get_or_create_conversation(
+    (
+        conversation,
+        followups,
+        actionable_plan,
+        weakness_resolutions,
+    ) = await coach_service.get_or_create_conversation(
         db=db,
         current_user=current_user,
         session_id=body.session_id,
@@ -52,6 +57,8 @@ async def get_or_create_coach_conversation(
     )
     resp = CoachConversationResponse.model_validate(conversation)
     resp.suggested_followups = followups
+    resp.actionable_plan = actionable_plan
+    resp.weakness_resolutions = weakness_resolutions
     return resp
 
 
@@ -133,3 +140,4 @@ async def add_coach_message(
         context_turn_index=body.context_turn_index,
     )
     return CoachMessageResponse.model_validate(message)
+

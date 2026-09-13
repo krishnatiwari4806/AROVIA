@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from google import genai
 from google.genai import types
@@ -19,6 +19,11 @@ from app.schemas.evaluation import (
 )
 from app.schemas.interview import GeneratedQuestion, NextTurnDecision
 from app.schemas.resume import ParsedResumeData
+from app.services.question_bank import (
+    get_competency_stages,
+    get_fallback_followup,
+    get_fallback_question,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +66,12 @@ Candidate Target Profile:
 - Interview Focus: {interview_focus}
 - Focus Skills: {focus_skills}
 
+Competency Progression Grounding:
+- Target Competency Stage: {current_stage_name}
+- Competency Domain: {current_competency_title}
+- Stage Focus: {current_stage_desc}
+- Benchmark Core Concept: {benchmark_concept}
+
 Job Description Context:
 {jd_context}
 
@@ -68,7 +79,7 @@ Candidate Resume Background:
 {resume_context}
 
 Instructions:
-1. Turn 0 is a warm-up question establishing baseline engineering context, domain background, or a key project mentioned on their resume that relates to the target role.
+1. Turn 0 is a warm-up question establishing baseline engineering context, domain background, or a key project related to {target_role} ({seniority_level}) aligned with {current_stage_name}.
 2. Formulate a realistic, clear, and conversational interview question in `question_text`.
 3. Provide a comprehensive senior-level benchmark answer in `ideal_answer` covering expected technical depths, concepts, and best practices.
 4. Specify the primary concept being evaluated in `primary_concept`.
@@ -82,6 +93,14 @@ Candidate Target Profile:
 - Seniority Level: {seniority_level}
 - Interview Focus: {interview_focus}
 - Focus Skills: {focus_skills}
+
+Competency Progression Architecture:
+- Competency Progression Arc:
+{competency_arc}
+- Next Progressive Stage: {current_stage_name} ({current_competency_title})
+- Stage Focus: {current_stage_desc}
+- Benchmark Evaluated Concept: {benchmark_concept}
+- Already Covered Topics/Questions: {covered_topics}
 
 Interview State & Pacing:
 - Current Turn Index: {current_turn_index}
@@ -97,14 +116,14 @@ Full Transcript History (Prior Turns):
 {transcript_history}
 
 Adaptive Logic & Rules:
-1. If `prior_turn_was_followup` is True, you CANNOT generate another follow-up. You MUST advance to the next core topic (or conclude if all core questions are done).
-2. If `remaining_followup_budget` <= 0, you CANNOT generate a follow-up. You MUST advance to the next core topic (or conclude if all core questions are done).
+1. If `prior_turn_was_followup` is True, you CANNOT generate another follow-up. You MUST advance to the next core competency stage ({current_stage_name}) or conclude if all core questions are done.
+2. If `remaining_followup_budget` <= 0, you CANNOT generate a follow-up. You MUST advance to the next core competency stage (or conclude if all core questions are done).
 3. If `remaining_core_questions` <= 0 and no follow-up is warranted (or budget exhausted), set `is_interview_complete=True`, `is_follow_up=False`, and leave question_text null.
 4. If follow-up IS allowed (`prior_turn_was_followup` is False and `remaining_followup_budget` > 0):
    - Evaluate candidate answer: Did the candidate make bold claims without explaining mechanics? Was the answer shallow, vague, or missing critical trade-offs?
-   - If YES: set `is_follow_up=True`, explain why in `follow_up_reasoning`, formulate a targeted probing question in `question_text`, provide `ideal_answer`, and `primary_concept`.
-   - If NO (answer was thorough/complete) OR candidate answered well: set `is_follow_up=False`, formulate the next core question according to the progressive difficulty arc (Core Concepts -> Edge Cases & System Trade-offs), provide `ideal_answer`, and `primary_concept`.
-5. Ensure the next question does not duplicate topics already thoroughly covered in prior turns.
+   - If YES: set `is_follow_up=True`, explain why in `follow_up_reasoning`, formulate a targeted probing question in `question_text` digging deeper into the technical mechanics of the previous question, provide `ideal_answer`, and `primary_concept`.
+   - If NO (answer was thorough/complete) OR candidate answered well: set `is_follow_up=False`, formulate the next core question advancing to {current_stage_name} ({current_competency_title}), provide `ideal_answer`, and `primary_concept`.
+5. Strictly avoid repeating questions or concepts already covered in prior turns.
 """
 
 SESSION_EVALUATION_PROMPT_TEMPLATE = """You are the Chief Technical Interview Evaluator for the AROVIA platform.
@@ -347,8 +366,34 @@ class GeminiService:
         focus_skills: Optional[List[str]] = None,
         parsed_jd_data: Optional[Dict[str, Any]] = None,
         resume_data: Optional[Dict[str, Any]] = None,
+        excluded_question_ids: Optional[Set[str]] = None,
     ) -> GeneratedQuestion:
-        """Generate the first initial core interview question (Turn 0)."""
+        """Generate the first initial core interview question (Turn 0) grounded in competency architecture."""
+        stages = get_competency_stages(
+            role=target_role,
+            seniority=seniority_level,
+            focus=interview_focus,
+        )
+        first_stage = stages[0] if stages else None
+        stage_name = (
+            first_stage.stage_name if first_stage else "Stage 1: Core Fundamentals"
+        )
+        comp_title = (
+            first_stage.competency_title
+            if first_stage
+            else "Engineering Fundamentals"
+        )
+        stage_desc = (
+            first_stage.description
+            if first_stage
+            else "Foundational engineering concepts and practical experience."
+        )
+        benchmark_concept = (
+            first_stage.core_questions[0].primary_concept
+            if first_stage and first_stage.core_questions
+            else "System Architecture & Engineering Trade-offs"
+        )
+
         jd_ctx = (
             json.dumps(parsed_jd_data, indent=2)
             if parsed_jd_data
@@ -368,6 +413,10 @@ class GeminiService:
             focus_skills=skills_str,
             jd_context=jd_ctx,
             resume_context=resume_ctx,
+            current_stage_name=stage_name,
+            current_competency_title=comp_title,
+            current_stage_desc=stage_desc,
+            benchmark_concept=benchmark_concept,
         )
 
         config = types.GenerateContentConfig(
@@ -387,7 +436,9 @@ class GeminiService:
                     config=config,
                 )
                 if response.text:
-                    return GeneratedQuestion.model_validate_json(response.text)
+                    parsed = GeneratedQuestion.model_validate_json(response.text)
+                    if parsed.question_text and parsed.question_text.strip():
+                        return parsed
             except Exception as exc:
                 logger.warning(
                     f"Gemini initial question generation attempt {attempt}/{max_attempts} failed: {exc}"
@@ -398,12 +449,19 @@ class GeminiService:
                 await asyncio.sleep(1.0)
 
         logger.warning(
-            f"Initial question generation failed: {last_exception}. Using fallback template question."
+            f"Initial question generation failed: {last_exception}. Using Question Bank fallback."
+        )
+        fallback_q = get_fallback_question(
+            role=target_role,
+            seniority=seniority_level,
+            focus=interview_focus,
+            stage_index=0,
+            excluded_question_ids=excluded_question_ids,
         )
         return GeneratedQuestion(
-            question_text=f"To start our interview for the {target_role} position, could you walk me through a technically complex project you built recently and the key architectural decisions you made?",
-            ideal_answer="A structured walkthrough of an end-to-end system including requirements, architectural choices, database design, trade-offs, and scalability bottlenecks.",
-            primary_concept="System Architecture & Project Walkthrough",
+            question_text=fallback_q.question_text,
+            ideal_answer=fallback_q.ideal_answer,
+            primary_concept=fallback_q.primary_concept,
         )
 
     async def evaluate_and_generate_next_turn(
@@ -419,14 +477,60 @@ class GeminiService:
         previous_question: str,
         candidate_answer: str,
         transcript_history: List[Dict[str, Any]],
+        excluded_question_ids: Optional[Set[str]] = None,
     ) -> NextTurnDecision:
-        """Evaluate candidate answer and decide whether to probe deeper or advance."""
+        """Evaluate candidate answer and decide whether to probe deeper or advance using Question Bank grounding."""
+        stages = get_competency_stages(
+            role=target_role,
+            seniority=seniority_level,
+            focus=interview_focus,
+        )
+
+        # Count completed core turns in transcript to calibrate stage progression
+        completed_core_turns = sum(
+            1 for t in transcript_history if not t.get("is_follow_up", False)
+        )
+        next_stage_index = min(len(stages) - 1, max(0, completed_core_turns)) if stages else 0
+        target_stage = stages[next_stage_index] if stages else None
+
+        stage_name = (
+            target_stage.stage_name
+            if target_stage
+            else f"Stage {next_stage_index + 1}: Core Progression"
+        )
+        comp_title = (
+            target_stage.competency_title if target_stage else "Engineering Core"
+        )
+        stage_desc = (
+            target_stage.description
+            if target_stage
+            else "Progressive architectural and implementation concepts."
+        )
+        benchmark_concept = (
+            target_stage.core_questions[0].primary_concept
+            if target_stage and target_stage.core_questions
+            else "System Design & Optimization"
+        )
+        competency_arc = (
+            "\n".join([f"- {s.stage_name}: {s.competency_title}" for s in stages])
+            if stages
+            else "- Core Technical Fundamentals"
+        )
+
         history_str = "\n".join(
             [
                 f"Turn {t.get('turn_index')}: [Q: {t.get('question_text')}] -> [A: {t.get('candidate_answer')}]"
                 for t in transcript_history
             ]
         ) or "None (Turn 0 completed)"
+
+        covered_topics = ", ".join(
+            [
+                t.get("question_text", "")[:60] + "..."
+                for t in transcript_history
+                if t.get("question_text")
+            ]
+        ) or "Turn 0 introductory question"
 
         skills_str = ", ".join(focus_skills) if focus_skills else "General technical skills"
 
@@ -435,6 +539,12 @@ class GeminiService:
             seniority_level=seniority_level,
             interview_focus=interview_focus,
             focus_skills=skills_str,
+            competency_arc=competency_arc,
+            current_stage_name=stage_name,
+            current_competency_title=comp_title,
+            current_stage_desc=stage_desc,
+            benchmark_concept=benchmark_concept,
+            covered_topics=covered_topics,
             current_turn_index=current_turn_index,
             remaining_core_questions=remaining_core_questions,
             remaining_followup_budget=remaining_followup_budget,
@@ -461,7 +571,16 @@ class GeminiService:
                     config=config,
                 )
                 if response.text:
-                    return NextTurnDecision.model_validate_json(response.text)
+                    parsed = NextTurnDecision.model_validate_json(response.text)
+                    if parsed.is_interview_complete:
+                        if remaining_core_questions > 0:
+                            logger.warning(
+                                f"Gemini returned premature completion with {remaining_core_questions} core questions remaining. Overriding with Question Bank fallback."
+                            )
+                            break
+                        return parsed
+                    elif parsed.question_text and parsed.question_text.strip():
+                        return parsed
             except Exception as exc:
                 logger.warning(
                     f"Gemini next turn generation attempt {attempt}/{max_attempts} failed: {exc}"
@@ -472,8 +591,10 @@ class GeminiService:
                 await asyncio.sleep(1.0)
 
         logger.warning(
-            f"Adaptive next turn generation failed: {last_exception}. Using fallback turn decision."
+            f"Adaptive next turn generation failed: {last_exception}. Using Question Bank fallback decision."
         )
+
+        # 1. If all core questions are completed, end session cleanly
         if remaining_core_questions <= 0:
             return NextTurnDecision(
                 is_follow_up=False,
@@ -481,12 +602,42 @@ class GeminiService:
                 follow_up_reasoning="All core questions completed.",
             )
 
+        # 2. If follow-up is eligible and answer was brief/shallow (< 10 words), provide concept-specific probe fallback
+        ans_words = len((candidate_answer or "").strip().split())
+        if (
+            not prior_turn_was_followup
+            and remaining_followup_budget > 0
+            and ans_words < 10
+        ):
+            followup_tpl = get_fallback_followup(
+                role=target_role,
+                seniority=seniority_level,
+                focus=interview_focus,
+                parent_concept=previous_question,
+            )
+            return NextTurnDecision(
+                is_follow_up=True,
+                is_interview_complete=False,
+                follow_up_reasoning="Candidate provided a concise response; probing deeper into underlying mechanics.",
+                question_text=followup_tpl.prompt,
+                ideal_answer=followup_tpl.ideal_focus,
+                primary_concept=followup_tpl.target_probe,
+            )
+
+        # 3. Otherwise, advance to the next progressive core question from Question Bank
+        fallback_core = get_fallback_question(
+            role=target_role,
+            seniority=seniority_level,
+            focus=interview_focus,
+            stage_index=next_stage_index,
+            excluded_question_ids=excluded_question_ids,
+        )
         return NextTurnDecision(
             is_follow_up=False,
             is_interview_complete=False,
-            question_text=f"Moving on to our next topic for {target_role}: How do you approach caching, database indexing, and query optimization when scaling read-heavy services?",
-            ideal_answer="A comprehensive discussion covering Redis/Memcached cache-aside patterns, TTLs, invalidation strategies, B-tree indexes, execution plans, and connection pooling.",
-            primary_concept="Performance Optimization & Caching",
+            question_text=fallback_core.question_text,
+            ideal_answer=fallback_core.ideal_answer,
+            primary_concept=fallback_core.primary_concept,
         )
 
     async def evaluate_interview_session(

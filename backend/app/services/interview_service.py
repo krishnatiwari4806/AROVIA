@@ -21,8 +21,28 @@ from app.schemas.interview import (
 )
 from app.services.gemini_service import GeminiService, get_gemini_service
 from app.services.interview_presets import ROLE_PRESETS
+from app.services.question_bank import (
+    get_competency_stages,
+    get_fallback_followup,
+    get_fallback_question,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_question_text(text: Optional[str]) -> str:
+    """Normalize question text for duplicate detection: strip punctuation, collapse whitespace, lowercase."""
+    if not text:
+        return ""
+    cleaned = re.sub(r"[^\w\s]", "", text.lower())
+    return " ".join(cleaned.split())
+
+
+def _normalize_answer_text(text: Optional[str]) -> str:
+    """Normalize candidate answer text for idempotent comparison: strip and collapse whitespace."""
+    if not text:
+        return ""
+    return " ".join(text.strip().split())
 
 
 def sanitize_job_description(text: Optional[str]) -> Optional[str]:
@@ -222,12 +242,24 @@ class InterviewService:
             resume_data=resume_data,
         )
 
+        q_text = (generated.question_text or "").strip()
+        ideal_ans = generated.ideal_answer or ""
+        if not q_text:
+            fallback_q0 = get_fallback_question(
+                role=session.target_role,
+                seniority=session.seniority_level,
+                focus=session.interview_focus,
+                stage_index=0,
+            )
+            q_text = fallback_q0.question_text
+            ideal_ans = fallback_q0.ideal_answer
+
         turn0 = InterviewQuestionTurn(
             session_id=session.id,
             turn_index=0,
             question_type="core",
-            question_text=generated.question_text,
-            ideal_answer=generated.ideal_answer,
+            question_text=q_text,
+            ideal_answer=ideal_ans,
             is_follow_up=False,
             parent_turn_id=None,
         )
@@ -274,11 +306,6 @@ class InterviewService:
             db=db, current_user=current_user, session_id=session_id
         )
 
-        if session.status != "in_progress":
-            raise ValidationError(
-                message="Cannot submit answer for an interview that is not in progress."
-            )
-
         turn_query = select(InterviewQuestionTurn).where(
             InterviewQuestionTurn.id == turn_id,
             InterviewQuestionTurn.session_id == session.id,
@@ -293,15 +320,55 @@ class InterviewService:
             )
 
         if turn.candidate_answer is not None:
-            raise ValidationError(
-                message="This question turn has already been answered.",
-                error_code="TURN_ALREADY_ANSWERED",
-            )
+            submitted_norm = _normalize_answer_text(request.candidate_answer)
+            existing_norm = _normalize_answer_text(turn.candidate_answer)
 
-        # 1. Update and persist candidate's answer
-        turn.candidate_answer = request.candidate_answer.strip()
-        turn.turn_duration_sec = request.turn_duration_sec
-        await db.flush()
+            if submitted_norm != existing_norm:
+                raise ValidationError(
+                    message="This question turn has already been answered.",
+                    error_code="TURN_ALREADY_ANSWERED",
+                )
+
+            # Idempotent retry with identical answer: determine existing state without re-running LLM or generating turns
+            if session.status in ("evaluating", "completed"):
+                return TurnAnswerSubmissionResponse(
+                    session_id=session.id,
+                    current_turn_index=turn.turn_index,
+                    session_status=session.status,
+                    is_interview_complete=True,
+                    answered_turn_id=turn.id,
+                    next_turn=None,
+                )
+
+            all_turns_query = (
+                select(InterviewQuestionTurn)
+                .where(InterviewQuestionTurn.session_id == session.id)
+                .order_by(InterviewQuestionTurn.turn_index.asc())
+            )
+            all_turns_res = await db.execute(all_turns_query)
+            all_turns = all_turns_res.scalars().all()
+
+            next_turns = [t for t in all_turns if t.turn_index > turn.turn_index]
+            if next_turns:
+                next_turn = next_turns[0]
+                return TurnAnswerSubmissionResponse(
+                    session_id=session.id,
+                    current_turn_index=next_turn.turn_index,
+                    session_status=session.status,
+                    is_interview_complete=False,
+                    answered_turn_id=turn.id,
+                    next_turn=InterviewQuestionTurnResponse.model_validate(next_turn),
+                )
+        else:
+            if session.status != "in_progress":
+                raise ValidationError(
+                    message="Cannot submit answer for an interview that is not in progress."
+                )
+
+            # 1. Update and persist candidate's answer
+            turn.candidate_answer = request.candidate_answer.strip()
+            turn.turn_duration_sec = request.turn_duration_sec
+            await db.flush()
 
         # 2. Fetch all completed turns in session
         all_turns_query = (
@@ -323,10 +390,8 @@ class InterviewService:
         remaining_core = max(0, session.planned_core_questions - completed_core)
         remaining_followup_budget = max(0, max_followups - completed_followups)
 
-        # 3. Check hard session completion boundary
-        if total_turns >= session.max_total_turns or (
-            remaining_core <= 0 and (turn.is_follow_up or remaining_followup_budget <= 0)
-        ):
+        # 3. Rule 6: Check hard maximum turn boundary
+        if total_turns >= session.max_total_turns:
             session.status = "evaluating"
             session.completed_at = datetime.now(timezone.utc)
             await db.commit()
@@ -339,12 +404,66 @@ class InterviewService:
                 next_turn=None,
             )
 
-        # 4. Invoke Gemini adaptive evaluator
+        # 4. Rules 2, 3, 4, 9: Determine follow-up eligibility for the just-answered turn
+        # A follow-up is ONLY allowed if:
+        # - The current answered turn is a core turn (not a follow-up)
+        # - The current core turn has not already received a follow-up
+        # - Global follow-up budget remains (> 0)
+        # - Total turns has not reached max_total_turns
+        already_has_followup = any(t.parent_turn_id == turn.id for t in followup_turns)
+        is_current_core = not turn.is_follow_up
+
+        followup_eligible = (
+            is_current_core
+            and not already_has_followup
+            and remaining_followup_budget > 0
+            and total_turns < session.max_total_turns
+        )
+
+        # 5. Check if any next turn is possible:
+        # If no follow-up is eligible AND no core questions remain, the interview is complete!
+        if not followup_eligible and remaining_core <= 0:
+            session.status = "evaluating"
+            session.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+            return TurnAnswerSubmissionResponse(
+                session_id=session.id,
+                current_turn_index=turn.turn_index,
+                session_status=session.status,
+                is_interview_complete=True,
+                answered_turn_id=turn.id,
+                next_turn=None,
+            )
+
+        # Collect prior normalized questions and known Question Bank IDs
+        prior_normalized_questions = {
+            _normalize_question_text(t.question_text)
+            for t in all_turns
+            if t.question_text
+        }
+        excluded_question_ids: set[str] = set()
+        stages = get_competency_stages(
+            role=session.target_role,
+            seniority=session.seniority_level,
+            focus=session.interview_focus,
+        )
+        for t in all_turns:
+            norm_t = _normalize_question_text(t.question_text)
+            for stage in stages:
+                for q in stage.core_questions:
+                    if _normalize_question_text(q.question_text) == norm_t:
+                        excluded_question_ids.add(q.id)
+                    for f in q.follow_ups:
+                        if _normalize_question_text(f.prompt) == norm_t:
+                            excluded_question_ids.add(f.id)
+
+        # 6. Invoke Gemini adaptive evaluator with authoritative state bounds
         transcript_history = [
             {
                 "turn_index": t.turn_index,
                 "question_text": t.question_text,
                 "candidate_answer": t.candidate_answer,
+                "is_follow_up": t.is_follow_up,
             }
             for t in all_turns
         ]
@@ -356,14 +475,51 @@ class InterviewService:
             focus_skills=session.focus_skills,
             current_turn_index=turn.turn_index,
             remaining_core_questions=remaining_core,
-            remaining_followup_budget=remaining_followup_budget,
+            remaining_followup_budget=remaining_followup_budget if followup_eligible else 0,
             prior_turn_was_followup=turn.is_follow_up,
             previous_question=turn.question_text,
             candidate_answer=turn.candidate_answer,
             transcript_history=transcript_history,
+            excluded_question_ids=excluded_question_ids,
         )
 
-        if decision.is_interview_complete or not decision.question_text:
+        # 7. Rules 1, 4, 7, 8: Validate and enforce deterministic next-turn state
+        allow_followup = followup_eligible and bool(decision.is_follow_up)
+
+        raw_q_text = (decision.question_text or "").strip()
+        is_duplicate = bool(raw_q_text and _normalize_question_text(raw_q_text) in prior_normalized_questions)
+
+        if allow_followup and raw_q_text and not is_duplicate:
+            next_is_followup = True
+            next_parent_turn_id = turn.id
+            next_question_type = "follow_up"
+            next_question_text = raw_q_text
+            next_ideal_answer = decision.ideal_answer
+        elif remaining_core > 0 and raw_q_text and not is_duplicate:
+            next_is_followup = False
+            next_parent_turn_id = None
+            next_question_type = "core"
+            next_question_text = raw_q_text
+            next_ideal_answer = decision.ideal_answer
+        elif remaining_core > 0:
+            # Fallback triggered by: premature completion, empty question text, or duplicate question text
+            logger.warning(
+                f"Session {session.id} Turn {turn.turn_index + 1}: Overriding Gemini output (duplicate={is_duplicate}, empty={not raw_q_text}) with Question Bank fallback."
+            )
+            fallback_core = get_fallback_question(
+                role=session.target_role,
+                seniority=session.seniority_level,
+                focus=session.interview_focus,
+                stage_index=completed_core,
+                excluded_question_ids=excluded_question_ids,
+            )
+            next_is_followup = False
+            next_parent_turn_id = None
+            next_question_type = "core"
+            next_question_text = fallback_core.question_text
+            next_ideal_answer = fallback_core.ideal_answer
+        else:
+            # Core budget exhausted or missing question text -> complete interview
             session.status = "evaluating"
             session.completed_at = datetime.now(timezone.utc)
             await db.commit()
@@ -376,16 +532,16 @@ class InterviewService:
                 next_turn=None,
             )
 
-        # 5. Create next turn
+        # 8. Create and persist the authoritative next turn
         next_turn_index = total_turns
         next_turn = InterviewQuestionTurn(
             session_id=session.id,
             turn_index=next_turn_index,
-            question_type="follow_up" if decision.is_follow_up else "core",
-            question_text=decision.question_text,
-            ideal_answer=decision.ideal_answer,
-            is_follow_up=decision.is_follow_up,
-            parent_turn_id=turn.id if decision.is_follow_up else None,
+            question_type=next_question_type,
+            question_text=next_question_text,
+            ideal_answer=next_ideal_answer,
+            is_follow_up=next_is_followup,
+            parent_turn_id=next_parent_turn_id,
         )
 
         session.current_turn_index = next_turn_index

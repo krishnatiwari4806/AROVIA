@@ -4,6 +4,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -16,6 +17,10 @@ from app.schemas.coach import (
     CoachConversationResponse,
     CoachHistoryResponse,
     CoachMessageResponse,
+)
+from app.schemas.progress import (
+    ActionableCoachingPlanDTO,
+    WeaknessResolutionStateDTO,
 )
 from app.services.coach_ai_service import CoachAIService, get_coach_ai_service
 from app.services.coach_context_builder import (
@@ -43,17 +48,54 @@ class CoachService:
         self.ai_service = ai_service or get_coach_ai_service()
         self.context_builder = context_builder or get_coach_context_builder()
 
+    async def _get_action_plan_and_resolutions(
+        self,
+        db: AsyncSession,
+        current_user: User,
+    ) -> Tuple[Optional[ActionableCoachingPlanDTO], List[WeaknessResolutionStateDTO]]:
+        """Retrieve the candidate's deterministic ActionableCoachingPlanDTO and WeaknessResolutionStateDTOs."""
+        stmt = (
+            select(InterviewSession)
+            .options(selectinload(InterviewSession.turns))
+            .where(
+                InterviewSession.user_id == current_user.id,
+                InterviewSession.status == "completed",
+                InterviewSession.overall_score.isnot(None),
+            )
+            .order_by(InterviewSession.started_at.asc())
+        )
+        res = await db.execute(stmt)
+        user_completed_sessions = list(res.scalars().all())
+
+        progress_service = self.context_builder.progress_service
+        actionable_plan = progress_service.generate_actionable_coaching_plan(
+            user_completed_sessions
+        )
+        weakness_resolutions = progress_service.compute_weakness_resolution_states(
+            user_completed_sessions
+        )
+        return actionable_plan, weakness_resolutions
+
     async def get_or_create_conversation(
         self,
         db: AsyncSession,
         current_user: User,
         session_id: Optional[str] = None,
         auto_debrief: bool = True,
-    ) -> Tuple[CoachConversation, List[str]]:
+    ) -> Tuple[
+        CoachConversation,
+        List[str],
+        Optional[ActionableCoachingPlanDTO],
+        List[WeaknessResolutionStateDTO],
+    ]:
         """Fetch an existing coach conversation for user + session, or create one idempotently.
 
         If a new conversation is initialized and auto_debrief is True, generates an opening debrief.
         """
+        actionable_plan, weakness_resolutions = (
+            await self._get_action_plan_and_resolutions(db, current_user)
+        )
+
         # 1. If session_id is provided, verify session exists and belongs to current user
         if session_id:
             session_stmt = select(InterviewSession).where(
@@ -77,6 +119,7 @@ class CoachService:
             )
             .order_by(CoachConversation.created_at.desc())
             .options(selectinload(CoachConversation.messages))
+            .execution_options(populate_existing=True)
         )
         res = await db.execute(stmt)
         conversation = res.scalars().first()
@@ -86,17 +129,46 @@ class CoachService:
         if conversation:
             # If conversation already exists and has messages, return it directly
             if conversation.messages:
-                return conversation, suggested_followups
+                return (
+                    conversation,
+                    suggested_followups,
+                    actionable_plan,
+                    weakness_resolutions,
+                )
 
-        # 3. Create new conversation if not existing
+        # 3. Create new conversation if not existing (with concurrency race-condition protection)
         if not conversation:
-            conversation = CoachConversation(
-                user_id=current_user.id,
-                session_id=session_id,
-            )
-            db.add(conversation)
-            await db.commit()
-            await db.refresh(conversation)
+            try:
+                conversation = CoachConversation(
+                    user_id=current_user.id,
+                    session_id=session_id,
+                )
+                db.add(conversation)
+                await db.commit()
+                await db.refresh(conversation)
+            except IntegrityError:
+                await db.rollback()
+                stmt = (
+                    select(CoachConversation)
+                    .where(
+                        CoachConversation.user_id == current_user.id,
+                        CoachConversation.session_id == session_id,
+                    )
+                    .order_by(CoachConversation.created_at.desc())
+                    .options(selectinload(CoachConversation.messages))
+                    .execution_options(populate_existing=True)
+                )
+                res = await db.execute(stmt)
+                conversation = res.scalars().first()
+                if not conversation:
+                    raise
+                if conversation.messages:
+                    return (
+                        conversation,
+                        suggested_followups,
+                        actionable_plan,
+                        weakness_resolutions,
+                    )
 
         # 4. Generate initial debrief if requested
         if auto_debrief:
@@ -129,9 +201,15 @@ class CoachService:
             select(CoachConversation)
             .where(CoachConversation.id == conversation.id)
             .options(selectinload(CoachConversation.messages))
+            .execution_options(populate_existing=True)
         )
         res = await db.execute(stmt)
-        return res.scalar_one(), suggested_followups
+        return (
+            res.scalar_one(),
+            suggested_followups,
+            actionable_plan,
+            weakness_resolutions,
+        )
 
     async def get_conversation_for_user(
         self,
@@ -147,6 +225,7 @@ class CoachService:
                 CoachConversation.user_id == current_user.id,
             )
             .options(selectinload(CoachConversation.messages))
+            .execution_options(populate_existing=True)
         )
         res = await db.execute(stmt)
         conversation = res.scalar_one_or_none()
@@ -165,6 +244,10 @@ class CoachService:
         session_id: str,
     ) -> CoachHistoryResponse:
         """Retrieve stored coach messages chronologically for a session."""
+        actionable_plan, weakness_resolutions = (
+            await self._get_action_plan_and_resolutions(db, current_user)
+        )
+
         # Verify session exists and belongs to current user
         session_stmt = select(InterviewSession).where(
             InterviewSession.id == session_id,
@@ -187,6 +270,7 @@ class CoachService:
             )
             .order_by(CoachConversation.created_at.desc())
             .options(selectinload(CoachConversation.messages))
+            .execution_options(populate_existing=True)
         )
         res = await db.execute(stmt)
         conversation = res.scalars().first()
@@ -198,6 +282,8 @@ class CoachService:
                 messages=[],
                 total_messages=0,
                 suggested_followups=DEFAULT_INITIAL_FOLLOWUPS,
+                actionable_plan=actionable_plan,
+                weakness_resolutions=weakness_resolutions,
             )
 
         messages_resp = [
@@ -211,6 +297,8 @@ class CoachService:
             messages=messages_resp,
             total_messages=len(messages_resp),
             suggested_followups=DEFAULT_INITIAL_FOLLOWUPS,
+            actionable_plan=actionable_plan,
+            weakness_resolutions=weakness_resolutions,
         )
 
     async def add_message(

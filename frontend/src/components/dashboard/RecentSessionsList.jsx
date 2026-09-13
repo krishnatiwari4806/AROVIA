@@ -10,23 +10,32 @@ export function RecentSessionsList({ sessions = [], onViewReport }) {
     sessions && sessions.length > 0
       ? sessions
           .filter((s) => s && (s.session_id || s.id))
-          .map((s, idx) => ({
-            id: s.session_id || s.id,
-            assessment_id:
-              s.assessment_id ||
-              `ARV-${850 - idx * 23}-${String.fromCharCode(65 + (idx % 26))}`,
-            date: s.completed_at
-              ? new Date(s.completed_at).toLocaleDateString('en-US', {
+          .map((s, idx) => {
+            const sid = String(s.session_id || s.id || '');
+            const cleanId = sid.length >= 8 ? `ARV-${sid.slice(-6).toUpperCase()}` : (sid || `ARV-${idx + 1}`);
+            let dateStr = 'Recent';
+            if (s.date) {
+              dateStr = s.date;
+            } else if (s.completed_at || s.started_at) {
+              const d = new Date(s.completed_at || s.started_at);
+              if (!isNaN(d.getTime())) {
+                dateStr = d.toLocaleDateString('en-US', {
                   month: 'short',
                   day: '2-digit',
                   year: 'numeric',
-                })
-              : 'Recent',
-            focus_area:
-              s.interview_focus || s.target_role || 'Technical Core',
-            status: s.status || 'completed',
-            score: s.overall_score !== undefined ? s.overall_score : null,
-          }))
+                });
+              }
+            }
+
+            return {
+              id: s.session_id || s.id,
+              assessment_id: cleanId,
+              date: dateStr,
+              focus_area: s.interview_focus || s.target_role || 'Technical Core',
+              status: s.status || 'completed',
+              score: s.overall_score !== undefined ? s.overall_score : null,
+            };
+          })
       : [];
 
   const getStatusBadge = (status) => {

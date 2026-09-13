@@ -23,6 +23,7 @@ import {
 import { api } from '../../services/api';
 import { useSpeechRecognition } from '../../hooks/useSpeechRecognition';
 import { useCoachVoice } from '../../hooks/useCoachVoice';
+import { ActionPlanCard } from './ActionPlanCard';
 
 /**
  * Format markdown-like text safely for the coaching dialogue.
@@ -112,6 +113,8 @@ export function CoachView({ sessionId, onBack, onViewReport, onStartSetup }) {
   const [conversation, setConversation] = useState(null);
   const [messages, setMessages] = useState([]);
   const [suggestedFollowups, setSuggestedFollowups] = useState([]);
+  const [actionablePlan, setActionablePlan] = useState(null);
+  const [weaknessResolutions, setWeaknessResolutions] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
   const [selectedTurnIndex, setSelectedTurnIndex] = useState(null);
   const [sending, setSending] = useState(false);
@@ -182,6 +185,8 @@ export function CoachView({ sessionId, onBack, onViewReport, onStartSetup }) {
       setConversation(convData);
       setMessages(convData.messages || []);
       setSuggestedFollowups(convData.suggested_followups || []);
+      setActionablePlan(convData.actionable_plan || null);
+      setWeaknessResolutions(convData.weakness_resolutions || []);
 
       // If auto-play voice is enabled and opening debrief exists, speak it
       if (convData.messages && convData.messages.length > 0 && autoPlayVoice) {
@@ -201,6 +206,12 @@ export function CoachView({ sessionId, onBack, onViewReport, onStartSetup }) {
   useEffect(() => {
     loadCoachSession();
   }, [loadCoachSession]);
+
+  const handleLaunchPractice = (practiceIntent) => {
+    if (onStartSetup) {
+      onStartSetup(practiceIntent);
+    }
+  };
 
   // Send candidate question to AI Coach
   const handleSendMessage = async (customText = null, turnOverride = null) => {
@@ -378,6 +389,15 @@ export function CoachView({ sessionId, onBack, onViewReport, onStartSetup }) {
 
           {/* Messages Stream */}
           <div className="coach-messages-scroll-area">
+            {/* Deterministic Action Plan Card */}
+            <ActionPlanCard
+              plan={actionablePlan}
+              weaknessResolutions={weaknessResolutions}
+              sessionData={sessionData}
+              onLaunchPractice={handleLaunchPractice}
+              onStartStandardSetup={onStartSetup}
+            />
+
             {error && (
               <div className="coach-error-alert">
                 <AlertCircle size={18} className="text-danger flex-shrink-0" />
