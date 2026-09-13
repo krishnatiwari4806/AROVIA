@@ -1,9 +1,16 @@
 """Coach conversation and message Pydantic v2 DTO schemas."""
 
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.schemas.progress import (
+    ActionableCoachingPlanDTO,
+    CandidateCurrentStateDTO,
+    CandidateLongitudinalStateDTO,
+    WeaknessResolutionStateDTO,
+)
 
 
 class CoachConversationCreate(BaseModel):
@@ -74,6 +81,8 @@ class CoachConversationResponse(BaseModel):
     updated_at: datetime
     messages: List[CoachMessageResponse] = Field(default_factory=list)
     suggested_followups: List[str] = Field(default_factory=list)
+    actionable_plan: Optional[ActionableCoachingPlanDTO] = None
+    weakness_resolutions: List[WeaknessResolutionStateDTO] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -86,6 +95,8 @@ class CoachHistoryResponse(BaseModel):
     messages: List[CoachMessageResponse] = Field(default_factory=list)
     total_messages: int = 0
     suggested_followups: List[str] = Field(default_factory=list)
+    actionable_plan: Optional[ActionableCoachingPlanDTO] = None
+    weakness_resolutions: List[WeaknessResolutionStateDTO] = Field(default_factory=list)
 
 
 class CoachChatRequest(BaseModel):
