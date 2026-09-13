@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -13,15 +14,28 @@ from app.core.config import settings
 
 
 def create_engine_instance() -> AsyncEngine:
-    """Create async SQLAlchemy engine with connection pool."""
+    """Create async SQLAlchemy engine with connection pool and SQLite concurrency pragmas."""
     db_url = settings.DATABASE_URL if settings else "sqlite+aiosqlite:///:memory:"
 
-    # SQLite in-memory does not support pool_size or max_overflow
+    # SQLite in-memory / file connection with WAL mode and concurrency resilience
     if "sqlite" in db_url:
-        return create_async_engine(
+        sqlite_engine = create_async_engine(
             db_url,
-            connect_args={"check_same_thread": False},
+            connect_args={
+                "check_same_thread": False,
+                "timeout": 30.0,
+            },
         )
+
+        @event.listens_for(sqlite_engine.sync_engine, "connect")
+        def set_sqlite_pragma(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL;")
+            cursor.execute("PRAGMA synchronous=NORMAL;")
+            cursor.execute("PRAGMA busy_timeout=30000;")
+            cursor.close()
+
+        return sqlite_engine
 
     return create_async_engine(
         db_url,
