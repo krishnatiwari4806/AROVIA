@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, RefreshCw, AlertCircle } from 'lucide-react';
 import { api } from '../../services/api';
 import StatsOverview from './StatsOverview';
 import RecentSessionsList from './RecentSessionsList';
@@ -7,89 +7,97 @@ import AIInsightCard from './AIInsightCard';
 
 /**
  * Candidate Intelligence Dashboard Master View.
- * Matches 1:1 with Figma layout: Top Stats, Recent Assessments Table, and AI Insight card.
- * Also renders the mobile Intelligence Overview card on smaller viewports.
+ * Consumes authoritative ProgressIntelligenceService REST API (`GET /api/v1/progress`).
+ * Eliminates all fabricated offsets, mock rankings, and fake dimensions.
  */
 export function Dashboard({ onStartInterview, onOpenSetup, onViewReport }) {
-  const [recentSessions, setRecentSessions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [progressData, setProgressData] = useState(null);
+
   const [stats, setStats] = useState({
-    readinessScore: '—',
     totalSessions: 0,
     averageScore: '—',
+    latestScore: '—',
+    bestScore: '—',
+    lowestScore: '—',
     clarityScore: '—',
-    logicScore: '—',
+    confidenceScore: '—',
+    relevanceScore: '—',
+    correctnessScore: '—',
     keywordsScore: '—',
+    trendDirection: 'Insufficient Data',
+    consistencyRating: 'Insufficient Data',
+    consistencyDescription: '',
+    nextFocus: null,
   });
+  const [recentSessions, setRecentSessions] = useState([]);
 
-  useEffect(() => {
-    async function loadData() {
-      // Check saved history in localStorage
-      const savedHistory = localStorage.getItem('arovia_recent_sessions');
-      if (savedHistory) {
-        try {
-          const parsed = JSON.parse(savedHistory);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            const completed = parsed.filter(
-              (s) => s && (s.session_id || s.id) && s.status === 'completed'
-            );
-            setRecentSessions(completed);
+  async function loadProgress() {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await api.getProgress();
+      setProgressData(data);
 
-            const scored = completed.filter(
-              (s) => typeof s.overall_score === 'number'
-            );
+      if (data && typeof data.total_completed_interviews === 'number') {
+        const total = data.total_completed_interviews;
+        const avg = data.average_overall_score !== null ? Math.round(data.average_overall_score) : null;
+        const dims = data.dimension_trends || {};
 
-            if (scored.length > 0) {
-              const sumScore = scored.reduce(
-                (acc, s) => acc + s.overall_score,
-                0
-              );
-              const avg = Math.round(sumScore / scored.length);
-              setStats({
-                readinessScore: Math.min(99, Math.max(0, avg + 2)),
-                totalSessions: completed.length,
-                averageScore: avg,
-                clarityScore: Math.min(99, avg + 3),
-                logicScore: Math.min(99, avg - 2),
-                keywordsScore: Math.min(99, avg - 4),
-              });
-            } else {
-              setStats({
-                readinessScore: '—',
-                totalSessions: completed.length,
-                averageScore: '—',
-                clarityScore: '—',
-                logicScore: '—',
-                keywordsScore: '—',
-              });
-            }
-          } else {
-            setRecentSessions([]);
-            setStats({
-              readinessScore: '—',
-              totalSessions: 0,
-              averageScore: '—',
-              clarityScore: '—',
-              logicScore: '—',
-              keywordsScore: '—',
-            });
-          }
-        } catch {
-          setRecentSessions([]);
-        }
+        setStats({
+          totalSessions: total,
+          averageScore: avg !== null ? avg : '—',
+          latestScore: data.latest_overall_score !== null ? data.latest_overall_score : '—',
+          bestScore: data.best_overall_score !== null ? data.best_overall_score : '—',
+          lowestScore: data.lowest_overall_score !== null ? data.lowest_overall_score : '—',
+          clarityScore: typeof dims.clarity?.latest_score === 'number' ? dims.clarity.latest_score : '—',
+          confidenceScore: typeof dims.confidence?.latest_score === 'number' ? dims.confidence.latest_score : '—',
+          relevanceScore: typeof dims.relevance?.latest_score === 'number' ? dims.relevance.latest_score : '—',
+          correctnessScore: typeof dims.correctness?.latest_score === 'number' ? dims.correctness.latest_score : '—',
+          keywordsScore: typeof dims.keywords?.latest_score === 'number' ? dims.keywords.latest_score : '—',
+          trendDirection: data.overall_trend?.direction || (total > 0 ? 'Baseline' : 'Insufficient Data'),
+          consistencyRating: data.consistency?.consistency_rating || 'Insufficient Data',
+          consistencyDescription: data.consistency?.description || '',
+          nextFocus: data.next_focus || null,
+        });
+
+        setRecentSessions(data.recent_sessions_summary || []);
       } else {
+        setStats({
+          totalSessions: 0,
+          averageScore: '—',
+          latestScore: '—',
+          bestScore: '—',
+          lowestScore: '—',
+          clarityScore: '—',
+          confidenceScore: '—',
+          relevanceScore: '—',
+          correctnessScore: '—',
+          keywordsScore: '—',
+          trendDirection: 'Insufficient Data',
+          consistencyRating: 'Insufficient Data',
+          consistencyDescription: '',
+          nextFocus: null,
+        });
         setRecentSessions([]);
       }
+    } catch (err) {
+      console.error('Error fetching progress intelligence:', err);
+      setError(err.message || 'Failed to load progress analytics.');
+    } finally {
+      setLoading(false);
     }
+  }
 
-    loadData();
+  useEffect(() => {
+    loadProgress();
 
-    const handleUpdate = () => loadData();
+    const handleUpdate = () => loadProgress();
     window.addEventListener('arovia_sessions_updated', handleUpdate);
-    window.addEventListener('storage', handleUpdate);
 
     return () => {
       window.removeEventListener('arovia_sessions_updated', handleUpdate);
-      window.removeEventListener('storage', handleUpdate);
     };
   }, []);
 
@@ -116,6 +124,45 @@ export function Dashboard({ onStartInterview, onOpenSetup, onViewReport }) {
         </div>
       </div>
 
+      {/* Error state banner */}
+      {error && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: 'var(--space-md)',
+            marginBottom: 'var(--space-md)',
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            borderRadius: 'var(--radius-md)',
+            color: '#f87171',
+            fontSize: 'var(--text-xs)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
+            <AlertCircle size={16} />
+            <span>{error}</span>
+          </div>
+          <button
+            onClick={loadProgress}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              background: 'transparent',
+              border: 'none',
+              color: '#f87171',
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+          >
+            <RefreshCw size={12} />
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Mobile-Only Intelligence Overview Card */}
       <div className="mobile-intelligence-overview-card">
         <div className="mobile-overview-header">
@@ -128,24 +175,28 @@ export function Dashboard({ onStartInterview, onOpenSetup, onViewReport }) {
             <span className="mobile-score-total">/100</span>
           </div>
           <div className="mobile-gauge-rank-info">
-            <span className="mobile-rank-badge">• Top 12% in Tech</span>
-            <p className="mobile-rank-desc">Consistent Practice Velocity</p>
+            <span className="mobile-rank-badge">
+              • {stats.totalSessions > 0 ? `${stats.trendDirection} Trajectory` : 'Awaiting Practice'}
+            </span>
+            <p className="mobile-rank-desc">
+              {stats.totalSessions > 0 ? `${stats.totalSessions} completed session(s)` : 'No completed sessions'}
+            </p>
           </div>
         </div>
 
-        {/* 3 Sub-Competency Metric Blocks */}
+        {/* 3 Sub-Competency Metric Blocks (Authentic Dimensions Only) */}
         <div className="mobile-sub-metrics-grid">
           <div className="sub-metric-box">
             <span className="sub-metric-val">{stats.clarityScore ?? '—'}</span>
             <span className="sub-metric-label">Clarity</span>
           </div>
           <div className="sub-metric-box">
-            <span className="sub-metric-val">{stats.logicScore ?? '—'}</span>
-            <span className="sub-metric-label">Logic</span>
+            <span className="sub-metric-val">{stats.relevanceScore ?? '—'}</span>
+            <span className="sub-metric-label">Relevance</span>
           </div>
           <div className="sub-metric-box">
-            <span className="sub-metric-val">{stats.keywordsScore ?? '—'}</span>
-            <span className="sub-metric-label">Keywords</span>
+            <span className="sub-metric-val">{stats.correctnessScore ?? '—'}</span>
+            <span className="sub-metric-label">Correctness</span>
           </div>
         </div>
       </div>
@@ -166,12 +217,12 @@ export function Dashboard({ onStartInterview, onOpenSetup, onViewReport }) {
 
         <div className="dashboard-right-col">
           <AIInsightCard
-            stats={stats}
+            totalSessions={stats.totalSessions}
             onOpenDetailedMap={() => {
               if (recentSessions.length > 0) {
-                onViewReport(recentSessions[0].id);
+                onViewReport(recentSessions[0].session_id || recentSessions[0].id);
               } else {
-                onViewReport('mock-1');
+                onStartInterview();
               }
             }}
           />
@@ -182,3 +233,4 @@ export function Dashboard({ onStartInterview, onOpenSetup, onViewReport }) {
 }
 
 export default Dashboard;
+
