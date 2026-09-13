@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, CommonModelMixin
@@ -17,6 +17,13 @@ class CoachConversation(CommonModelMixin, Base):
     """Personal AI Coach persistent conversation session."""
 
     __tablename__ = "coach_conversations"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "session_id",
+            name="uq_coach_conversation_user_session",
+        ),
+    )
 
     user_id: Mapped[str] = mapped_column(
         String(36),
