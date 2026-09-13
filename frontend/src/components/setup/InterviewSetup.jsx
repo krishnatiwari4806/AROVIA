@@ -9,6 +9,8 @@ import {
   X,
   Briefcase,
   Sliders,
+  Sparkles,
+  RotateCcw,
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { getAroviaSettings } from '../../services/settingsManager';
@@ -17,20 +19,8 @@ import { getAroviaSettings } from '../../services/settingsManager';
  * Interview Setup & Configuration Screen.
  * 1:1 match with Figma references across Desktop, Tablet, and Mobile.
  */
-export function InterviewSetup({ onStartInterview, onBack }) {
+export function InterviewSetup({ practiceIntent = null, onStartInterview, onBack }) {
   const savedSettings = getAroviaSettings()?.interview || {};
-  const [rolePreset, setRolePreset] = useState(savedSettings.defaultRole || 'Backend');
-  const [customRole, setCustomRole] = useState('');
-  const [seniorityLevel, setSeniorityLevel] = useState(savedSettings.defaultSeniority || 'Senior');
-  const [jobDescription, setJobDescription] = useState('');
-  const [primaryFocus, setPrimaryFocus] = useState(savedSettings.defaultFocus || ['Technical Core', 'Behavioral']);
-  const [sessionMode, setSessionMode] = useState(savedSettings.defaultSessionMode || 'standard');
-  const [parsedResume, setParsedResume] = useState(null);
-  const [isUploadingResume, setIsUploadingResume] = useState(false);
-  const [creatingSession, setCreatingSession] = useState(false);
-  const [error, setError] = useState(null);
-
-  const fileInputRef = useRef(null);
 
   const roles = [
     'Backend',
@@ -41,6 +31,59 @@ export function InterviewSetup({ onStartInterview, onBack }) {
     'Mobile',
     'Custom Role',
   ];
+
+  // Helper to map practiceIntent initial values safely
+  const getInitialRole = () => {
+    if (practiceIntent?.target_role) {
+      const match = roles.find((r) => r.toLowerCase() === practiceIntent.target_role.toLowerCase());
+      if (match) return match;
+      return 'Custom Role';
+    }
+    return savedSettings.defaultRole || 'Backend';
+  };
+
+  const getInitialSeniority = () => {
+    if (practiceIntent?.seniority_level) {
+      const s = practiceIntent.seniority_level.toLowerCase();
+      if (s.includes('junior')) return 'Junior';
+      if (s.includes('mid')) return 'Mid-Level';
+      if (s.includes('staff') || s.includes('principal')) return 'Staff / Principal';
+      if (s.includes('executive')) return 'Executive';
+      return 'Senior';
+    }
+    return savedSettings.defaultSeniority || 'Senior';
+  };
+
+  const getInitialFocus = () => {
+    if (practiceIntent?.interview_focus) {
+      return [practiceIntent.interview_focus];
+    }
+    return savedSettings.defaultFocus || ['Technical Core', 'Behavioral'];
+  };
+
+  const getInitialMode = () => {
+    if (practiceIntent?.practice_mode) {
+      return practiceIntent.practice_mode === 'quick' ? 'quick' : 'standard';
+    }
+    return savedSettings.defaultSessionMode || 'standard';
+  };
+
+  const [rolePreset, setRolePreset] = useState(getInitialRole);
+  const [customRole, setCustomRole] = useState(
+    practiceIntent?.target_role && !roles.some((r) => r.toLowerCase() === practiceIntent.target_role.toLowerCase())
+      ? practiceIntent.target_role
+      : ''
+  );
+  const [seniorityLevel, setSeniorityLevel] = useState(getInitialSeniority);
+  const [jobDescription, setJobDescription] = useState('');
+  const [primaryFocus, setPrimaryFocus] = useState(getInitialFocus);
+  const [sessionMode, setSessionMode] = useState(getInitialMode);
+  const [parsedResume, setParsedResume] = useState(null);
+  const [isUploadingResume, setIsUploadingResume] = useState(false);
+  const [creatingSession, setCreatingSession] = useState(false);
+  const [error, setError] = useState(null);
+
+  const fileInputRef = useRef(null);
 
   const seniorityOptions = [
     { id: 'Junior', label: 'Junior' },
@@ -146,13 +189,19 @@ export function InterviewSetup({ onStartInterview, onBack }) {
         ? 'Behavioral'
         : 'Technical Core';
 
+      const combinedSkills = [
+        ...(practiceIntent?.focus_skills || []),
+        ...primaryFocus,
+      ];
+      const uniqueSkills = [...new Set(combinedSkills)];
+
       const sessionPayload = {
         target_role: targetRoleTitle,
         seniority_level: seniorityCode,
         interview_focus: focusCode,
         practice_mode: sessionMode === 'quick' ? 'quick' : 'full',
         custom_job_desc: jobDescription.trim() || undefined,
-        focus_skills: primaryFocus,
+        focus_skills: uniqueSkills,
       };
 
       try {
@@ -189,6 +238,28 @@ export function InterviewSetup({ onStartInterview, onBack }) {
           </p>
         </div>
       </div>
+
+      {practiceIntent && (
+        <div className="practice-intent-calibration-banner" data-testid="practice-intent-banner">
+          <div className="calibration-banner-icon">
+            <Sparkles size={18} className="text-secondary" />
+          </div>
+          <div className="calibration-banner-text">
+            <div className="calibration-banner-badge-line">
+              <span className="calibration-pill">FOCUSED PRACTICE CALIBRATION</span>
+              {practiceIntent.category && (
+                <span className="category-sub-pill">{practiceIntent.category}</span>
+              )}
+            </div>
+            <h3 className="calibration-title">
+              Target Focus: <span>{practiceIntent.focus_topic}</span>
+            </h3>
+            <p className="calibration-desc">
+              Parameters below have been pre-filled from your Personal AI Coach Action Plan. Review and adjust any settings before starting your interview drill.
+            </p>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="setup-error-banner">
