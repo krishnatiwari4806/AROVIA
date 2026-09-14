@@ -367,3 +367,11 @@ def classify_candidate_answer(
         confidence=0.9 if semantic_tier else 0.75,
         evidence=["substantive_response"],
     )
+
+
+def is_non_answer(text: Optional[str]) -> bool:
+    """Check if candidate text is classified as non-answer, empty, or pass/skip."""
+    classification = classify_answer_deterministically(text)
+    if classification is None:
+        return False
+    return bool(classification.is_non_answer or classification.is_empty)
