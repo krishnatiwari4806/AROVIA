@@ -20,6 +20,10 @@ from app.schemas.interview import (
     TurnAnswerSubmissionResponse,
 )
 from app.services.candidate_context import CandidateContext, build_candidate_context
+from app.services.conversational_bridge import (
+    BridgeType,
+    get_conversational_bridge_engine,
+)
 from app.services.gemini_service import (
     GeminiService,
     get_fallback_followup,
@@ -37,6 +41,8 @@ from app.services.question_planner import (
     QuestionPlanner,
     get_question_planner,
 )
+from app.services.reference_evaluator import get_reference_evaluator_service
+from app.services.semantic_evaluator import get_semantic_evaluator_engine
 
 logger = logging.getLogger(__name__)
 
@@ -744,6 +750,24 @@ class InterviewService:
             for t in all_turns
         ]
 
+        # Resolve Reference Payload and evaluate semantics of the answered turn
+        ref_service = get_reference_evaluator_service()
+        ref_payload = ref_service.resolve_reference_for_turn(
+            turn=turn,
+            parsed_jd_data=session.parsed_jd_data,
+            resume_data=resume_data,
+            focus_skills=session.focus_skills,
+            target_role=session.target_role,
+            seniority_level=session.seniority_level,
+        )
+        sem_engine = get_semantic_evaluator_engine()
+        sem_result = sem_engine.evaluate_turn_semantics(
+            candidate_answer=turn.candidate_answer or "",
+            reference_payload=ref_payload,
+            question_text=turn.question_text,
+            interview_focus=session.interview_focus,
+        )
+
         planner = get_question_planner()
         next_core_plan = planner.plan_next_question(
             context=candidate_context,
@@ -753,7 +777,7 @@ class InterviewService:
             previous_turns=transcript_history,
         )
 
-        # Invoke Gemini adaptive evaluator with Candidate Context, Planner, and authoritative state bounds
+        # Invoke Gemini adaptive evaluator with Candidate Context, Planner, Semantic Evidence, and authoritative state bounds
         decision = await self.gemini_service.evaluate_and_generate_next_turn(
             target_role=session.target_role,
             seniority_level=session.seniority_level,
@@ -772,6 +796,8 @@ class InterviewService:
             resume_data=resume_data,
             candidate_context=candidate_context,
             question_plan=next_core_plan,
+            semantic_result=sem_result,
+            reference_payload=ref_payload,
         )
 
         # 8. Validate and enforce deterministic next-turn state
