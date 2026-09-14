@@ -24,6 +24,18 @@ def mock_gemini_evaluation():
                 TurnEvaluationItem(
                     turn_index=0,
                     relevance_score=90,
+                    correctness_score=85,
+                    keywords_score=85,
+                    clarity_score=90,
+                    confidence_score=85,
+                    covered_concepts=["Background", "Experience"],
+                    missed_concepts=[],
+                    ideal_answer_comparison="Clear introduction of background and experience.",
+                    turn_feedback="Good concise introduction.",
+                ),
+                TurnEvaluationItem(
+                    turn_index=1,
+                    relevance_score=90,
                     correctness_score=88,
                     keywords_score=85,
                     clarity_score=90,
@@ -34,23 +46,35 @@ def mock_gemini_evaluation():
                     turn_feedback="Solid grasp of PostgreSQL write optimization.",
                 ),
                 TurnEvaluationItem(
-                    turn_index=1,
+                    turn_index=2,
+                    relevance_score=92,
+                    correctness_score=90,
+                    keywords_score=88,
+                    clarity_score=90,
+                    confidence_score=88,
+                    covered_concepts=["Saga Pattern", "Choreography", "RabbitMQ"],
+                    missed_concepts=[],
+                    ideal_answer_comparison="Clear understanding of distributed transaction saga patterns.",
+                    turn_feedback="Strong knowledge of message-driven saga choreography.",
+                ),
+                TurnEvaluationItem(
+                    turn_index=3,
                     relevance_score=95,
                     correctness_score=92,
                     keywords_score=90,
                     clarity_score=95,
                     confidence_score=90,
-                    covered_concepts=["WAL Bypass", "Crash Safety Trade-offs"],
-                    missed_concepts=["Replication Ineligibility"],
-                    ideal_answer_comparison="Accurate explanation of WAL bypass speedup and crash implications.",
-                    turn_feedback="Excellent awareness of database failure boundaries.",
+                    covered_concepts=["OpenTelemetry", "Distributed Tracing"],
+                    missed_concepts=[],
+                    ideal_answer_comparison="Accurate explanation of distributed tracing.",
+                    turn_feedback="Excellent observability awareness.",
                 ),
             ],
             top_strengths=[
                 StrengthItem(
                     title="Deep PostgreSQL Mastery",
                     description="Demonstrated nuanced understanding of write performance and WAL trade-offs.",
-                    evidence_turn_index=0,
+                    evidence_turn_index=1,
                 )
             ],
             top_improvements=[
@@ -58,7 +82,7 @@ def mock_gemini_evaluation():
                     title="Partitioning Strategies",
                     description="Could explore declarative range and hash partitioning for multi-terabyte scale.",
                     actionable_recommendation="Review PostgreSQL declarative partitioning guides.",
-                    evidence_turn_index=0,
+                    evidence_turn_index=1,
                 )
             ],
             executive_summary="Candidate demonstrated impressive database engineering competence across multiple challenging turns.",
@@ -99,42 +123,60 @@ async def test_evaluate_session_endpoint_success(
     session_id = create_res.json()["id"]
 
     # 3. Start interview (Turn 0)
+    from app.schemas.interview import GeneratedQuestion, NextTurnDecision
+
+    start_res = await client.post(
+        f"/api/v1/interviews/sessions/{session_id}/start",
+        headers=headers,
+    )
+    assert start_res.status_code == 200
+    turn0_id = start_res.json()["id"]
+
+    # 4. Answer Turn 0 (Intro), 1 (Core 1), 2 (Core 2), and 3 (Core 3) to complete all 3 quick-mode core questions
     with patch(
         "app.services.gemini_service.GeminiService.generate_initial_question",
         new_callable=AsyncMock,
-    ) as mock_initial:
-        from app.schemas.interview import GeneratedQuestion, NextTurnDecision
-
+    ) as mock_initial, patch(
+        "app.services.gemini_service.GeminiService.evaluate_and_generate_next_turn",
+        new_callable=AsyncMock,
+    ) as mock_next:
         mock_initial.return_value = GeneratedQuestion(
             question_text="How do you handle high-throughput writes in PostgreSQL?",
             ideal_answer="Explanation covering connection pooling, batching, and WAL tuning.",
             primary_concept="Database Write Scaling",
         )
-        start_res = await client.post(
-            f"/api/v1/interviews/sessions/{session_id}/start",
-            headers=headers,
-        )
-        assert start_res.status_code == 200
-        turn0_id = start_res.json()["id"]
-
-    # 4. Answer Turn 0, 1, and 2 to complete all 3 quick-mode core questions
-    with patch(
-        "app.services.gemini_service.GeminiService.evaluate_and_generate_next_turn",
-        new_callable=AsyncMock,
-    ) as mock_next:
-        mock_next.return_value = NextTurnDecision(
-            is_follow_up=False,
-            is_interview_complete=False,
-            question_text="How do you handle transactions across microservices?",
-            ideal_answer="Saga pattern with compensating transactions.",
-            primary_concept="Distributed Transactions",
-            follow_up_reasoning="Good answer, moving to next core competency.",
-        )
+        mock_next.side_effect = [
+            NextTurnDecision(
+                is_follow_up=False,
+                is_interview_complete=False,
+                question_text="How do you handle transactions across microservices?",
+                ideal_answer="Saga pattern with compensating transactions.",
+                primary_concept="Distributed Transactions",
+                follow_up_reasoning="Good answer, moving to next core competency.",
+            ),
+            NextTurnDecision(
+                is_follow_up=False,
+                is_interview_complete=False,
+                question_text="How do you monitor distributed systems and trace requests?",
+                ideal_answer="Distributed tracing using OpenTelemetry and context propagation.",
+                primary_concept="Observability",
+                follow_up_reasoning="Moving to system observability.",
+            ),
+            NextTurnDecision(
+                is_follow_up=False,
+                is_interview_complete=True,
+                question_text="",
+                ideal_answer="",
+                primary_concept="",
+                follow_up_reasoning="Completed planned interview questions.",
+            ),
+        ]
+        # Turn 0: Intro answer -> generates Core 1 via mock_initial
         ans0 = await client.post(
             f"/api/v1/interviews/sessions/{session_id}/turns/{turn0_id}/answer",
             json={
-                "candidate_answer": "We use connection pooling with asyncpg and bulk inserts for high throughput writes.",
-                "turn_duration_sec": 75,
+                "candidate_answer": "Hi, I am an experienced backend engineer with 5 years in Python and distributed systems.",
+                "turn_duration_sec": 30,
             },
             headers=headers,
         )
@@ -142,11 +184,12 @@ async def test_evaluate_session_endpoint_success(
         assert ans0.json()["is_interview_complete"] is False
         turn1_id = ans0.json()["next_turn"]["id"]
 
+        # Turn 1: Core 1 answer -> generates Core 2 via mock_next
         ans1 = await client.post(
             f"/api/v1/interviews/sessions/{session_id}/turns/{turn1_id}/answer",
             json={
-                "candidate_answer": "We use choreography-based Sagas with RabbitMQ message queues.",
-                "turn_duration_sec": 60,
+                "candidate_answer": "We use connection pooling with asyncpg, batching with bulk inserts, and WAL tuning for high throughput writes.",
+                "turn_duration_sec": 75,
             },
             headers=headers,
         )
@@ -154,17 +197,30 @@ async def test_evaluate_session_endpoint_success(
         assert ans1.json()["is_interview_complete"] is False
         turn2_id = ans1.json()["next_turn"]["id"]
 
-        # Final core question answer completes the session
+        # Turn 2: Core 2 answer -> generates Core 3 via mock_next
         ans2 = await client.post(
             f"/api/v1/interviews/sessions/{session_id}/turns/{turn2_id}/answer",
             json={
-                "candidate_answer": "We implement distributed tracing with OpenTelemetry to track requests.",
-                "turn_duration_sec": 50,
+                "candidate_answer": "We use choreography-based Sagas with compensating transactions and RabbitMQ message queues.",
+                "turn_duration_sec": 60,
             },
             headers=headers,
         )
         assert ans2.status_code == 200
-        assert ans2.json()["is_interview_complete"] is True
+        assert ans2.json()["is_interview_complete"] is False
+        turn3_id = ans2.json()["next_turn"]["id"]
+
+        # Turn 3: Core 3 answer completes the session (3 of 3 core completed)
+        ans3 = await client.post(
+            f"/api/v1/interviews/sessions/{session_id}/turns/{turn3_id}/answer",
+            json={
+                "candidate_answer": "We implement distributed tracing with OpenTelemetry and context propagation to track requests.",
+                "turn_duration_sec": 50,
+            },
+            headers=headers,
+        )
+        assert ans3.status_code == 200
+        assert ans3.json()["is_interview_complete"] is True
 
     # 5. Evaluate the completed interview session
     eval_res = await client.post(
@@ -215,41 +271,32 @@ async def test_get_session_evaluation_saved_report(
     )
     session_id = create_res.json()["id"]
 
-    with patch(
-        "app.services.gemini_service.GeminiService.generate_initial_question",
-        new_callable=AsyncMock,
-    ) as mock_initial:
-        from app.schemas.interview import GeneratedQuestion, NextTurnDecision
+    start_res = await client.post(
+        f"/api/v1/interviews/sessions/{session_id}/start",
+        headers=headers,
+    )
+    turn0_id = start_res.json()["id"]
 
-        mock_initial.return_value = GeneratedQuestion(
-            question_text="Describe distributed caching strategies.",
-            ideal_answer="Redis cluster, cache invalidation, write-through vs cache-aside.",
-            primary_concept="Caching Architecture",
-        )
-        start_res = await client.post(
-            f"/api/v1/interviews/sessions/{session_id}/start",
-            headers=headers,
-        )
-        turn0_id = start_res.json()["id"]
+    # Answer Turn 0 (Intro) -> Core 1
+    ans0 = await client.post(
+        f"/api/v1/interviews/sessions/{session_id}/turns/{turn0_id}/answer",
+        json={
+            "candidate_answer": "Candidate introduction overview.",
+            "turn_duration_sec": 30,
+        },
+        headers=headers,
+    )
+    turn1_id = ans0.json()["next_turn"]["id"]
 
-    # Answer Turn
-    with patch(
-        "app.services.gemini_service.GeminiService.evaluate_and_generate_next_turn",
-        new_callable=AsyncMock,
-    ) as mock_next:
-        mock_next.return_value = NextTurnDecision(
-            is_follow_up=False,
-            is_interview_complete=True,
-            question_text=None,
-        )
-        await client.post(
-            f"/api/v1/interviews/sessions/{session_id}/turns/{turn0_id}/answer",
-            json={
-                "candidate_answer": "We use Redis cache-aside with TTL and pub-sub for invalidation.",
-                "turn_duration_sec": 90,
-            },
-            headers=headers,
-        )
+    # Answer Core 1
+    await client.post(
+        f"/api/v1/interviews/sessions/{session_id}/turns/{turn1_id}/answer",
+        json={
+            "candidate_answer": "We use Redis cache-aside with TTL and pub-sub for invalidation.",
+            "turn_duration_sec": 90,
+        },
+        headers=headers,
+    )
 
     # First trigger evaluation
     eval_res = await client.post(

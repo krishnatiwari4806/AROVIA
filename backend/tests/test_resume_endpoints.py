@@ -15,6 +15,27 @@ MOCK_PARSED_DATA = ParsedResumeData(
     domains=["Backend Engineering", "Distributed Systems"],
     education=[{"institution": "Stanford University", "degree": "M.S. Computer Science", "graduation_year": "2021"}],
     summary="Passionate backend engineer with 4 years of building distributed web services.",
+    projects=[
+        {
+            "title": "Cloud Inventory Engine",
+            "description": "Distributed inventory management microservice.",
+            "technologies": ["Python", "FastAPI", "PostgreSQL", "Redis"],
+            "responsibilities": "Lead engineer designing state sync.",
+            "architecture_details": "CQRS with Redis cache invalidation.",
+            "challenges": "Resolving race conditions on concurrent stock updates.",
+            "outcomes": "Zero stock discrepancy across 100k daily orders.",
+        }
+    ],
+    work_history=[
+        {
+            "company": "Acme Corp",
+            "role": "Backend Engineer",
+            "duration": "2021 - Present",
+            "responsibilities": ["Maintained REST APIs", "Database query optimization"],
+            "technologies": ["Python", "FastAPI", "PostgreSQL"],
+            "achievements": ["Reduced API latency by 40%"],
+        }
+    ],
 )
 
 
@@ -36,7 +57,7 @@ async def test_unauthenticated_resume_endpoints_fail(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_resume_upload_get_update_delete_lifecycle(client: AsyncClient):
-    """Full lifecycle test: upload resume, fetch parsed data, update skills, delete resume."""
+    """Full lifecycle test: upload resume, fetch parsed data, update skills and projects, delete resume."""
     # 1. Register candidate
     reg_res = await client.post(
         "/api/v1/auth/register",
@@ -71,15 +92,20 @@ async def test_resume_upload_get_update_delete_lifecycle(client: AsyncClient):
         assert data["resume"]["file_name"] == "resume.docx"
         assert data["resume"]["parsed_data"]["skills"] == ["Python", "FastAPI", "PostgreSQL", "Docker", "Redis"]
         assert data["resume"]["parsed_data"]["experience_years"] == 4.0
+        assert len(data["resume"]["parsed_data"]["projects"]) == 1
+        assert data["resume"]["parsed_data"]["projects"][0]["title"] == "Cloud Inventory Engine"
+        assert len(data["resume"]["parsed_data"]["work_history"]) == 1
+        assert data["resume"]["parsed_data"]["work_history"][0]["company"] == "Acme Corp"
 
-    # 4. GET /me returns active resume
+    # 4. GET /me returns active resume with projects and work history
     get_res = await client.get("/api/v1/resumes/me", headers=headers)
     assert get_res.status_code == 200
     get_data = get_res.json()
     assert get_data["file_name"] == "resume.docx"
     assert "Python" in get_data["parsed_data"]["skills"]
+    assert get_data["parsed_data"]["projects"][0]["title"] == "Cloud Inventory Engine"
 
-    # 5. PUT /me/parsed updates candidate profile
+    # 5. PUT /me/parsed updates candidate profile including projects
     put_res = await client.put(
         "/api/v1/resumes/me/parsed",
         headers=headers,
@@ -87,6 +113,17 @@ async def test_resume_upload_get_update_delete_lifecycle(client: AsyncClient):
             "skills": ["Python", "FastAPI", "GraphQL", "AWS"],
             "experience_years": 5.0,
             "summary": "Updated executive career summary.",
+            "projects": [
+                {
+                    "title": "Updated High Scale Gateway",
+                    "description": "API Gateway serving 50k RPS.",
+                    "technologies": ["Go", "FastAPI"],
+                    "responsibilities": "Core author",
+                    "architecture_details": "Async proxy",
+                    "challenges": "Memory footprint",
+                    "outcomes": "Saved 40% compute",
+                }
+            ],
         },
     )
     assert put_res.status_code == 200
@@ -94,7 +131,9 @@ async def test_resume_upload_get_update_delete_lifecycle(client: AsyncClient):
     assert put_data["parsed_data"]["skills"] == ["Python", "FastAPI", "GraphQL", "AWS"]
     assert put_data["parsed_data"]["experience_years"] == 5.0
     assert put_data["parsed_data"]["summary"] == "Updated executive career summary."
-    # Domains and education preserved
+    assert len(put_data["parsed_data"]["projects"]) == 1
+    assert put_data["parsed_data"]["projects"][0]["title"] == "Updated High Scale Gateway"
+    # Domains preserved
     assert "Backend Engineering" in put_data["parsed_data"]["domains"]
 
     # 6. DELETE /me removes active resume

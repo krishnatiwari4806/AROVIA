@@ -87,7 +87,7 @@ async def test_create_standard_full_and_quick_practice_sessions(client: AsyncCli
         assert session_data["interview_focus"] == "Technical Core"
         assert session_data["practice_mode"] == "full"
         assert session_data["planned_core_questions"] == 6
-        assert session_data["max_total_turns"] == 9
+        assert session_data["max_total_turns"] == 10
         assert session_data["current_turn_index"] == 0
         assert session_data["status"] == "in_progress"
         assert session_data["focus_skills"] == ["Python", "FastAPI", "Docker"]
@@ -145,7 +145,7 @@ async def test_create_standard_full_and_quick_practice_sessions(client: AsyncCli
         quick_data = quick_res.json()
         assert quick_data["practice_mode"] == "quick"
         assert quick_data["planned_core_questions"] == 3
-        assert quick_data["max_total_turns"] == 5
+        assert quick_data["max_total_turns"] == 6
         # Since no focus_skills passed, preset default skills are populated
         assert len(quick_data["focus_skills"]) > 0
         assert "PyTorch" in quick_data["focus_skills"]

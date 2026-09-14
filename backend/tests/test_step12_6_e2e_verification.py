@@ -258,7 +258,7 @@ async def test_e2e_practice_launch_and_interview_engine_progression(
 
     # 4. Verify Pacing and Adaptive Engine Progression for Quick Mode (3 core questions planned)
     assert new_session.planned_core_questions == 3
-    assert new_session.max_total_turns == 5
+    assert new_session.max_total_turns == 6
 
 
 # =========================================================================
