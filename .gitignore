@@ -44,6 +44,8 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+scratch/
+backend/scratch/
 
 # Test / coverage
 .coverage
