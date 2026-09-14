@@ -30,6 +30,14 @@ class PracticeMode(str, Enum):
     quick = "quick"
 
 
+class PreferredLanguage(str, Enum):
+    """Candidate preferred interview language."""
+
+    en = "en"
+    hi = "hi"
+    hinglish = "hinglish"
+
+
 class SessionStatus(str, Enum):
     """Interview session lifecycle state."""
 
@@ -78,6 +86,10 @@ class InterviewSessionCreateRequest(BaseModel):
     interview_focus: InterviewFocus = Field(
         ..., description="Primary interview focus dimension."
     )
+    preferred_language: PreferredLanguage = Field(
+        default=PreferredLanguage.en,
+        description="Candidate preferred interview language: en (English), hi (Hindi), hinglish (Hinglish).",
+    )
     practice_mode: PracticeMode = Field(
         default=PracticeMode.full,
         description="Pacing mode: full (6 core/9 max) or quick (3 core/5 max).",
@@ -102,6 +114,7 @@ class InterviewSessionResponse(BaseModel):
     target_role: str
     seniority_level: str
     interview_focus: str
+    preferred_language: str = "en"
     practice_mode: str
     planned_core_questions: int
     max_total_turns: int
@@ -172,6 +185,11 @@ class InterviewQuestionTurnResponse(BaseModel):
     parent_turn_id: Optional[str] = None
     ideal_answer: Optional[str] = None
     turn_duration_sec: Optional[int] = None
+    core_question_index: Optional[int] = None
+    core_question_number: Optional[int] = None
+    total_core_questions: int = 6
+    follow_up_number: int = 0
+    interview_phase: str = "core_question"
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -202,6 +220,9 @@ class TurnAnswerSubmissionResponse(BaseModel):
     session_status: str
     is_interview_complete: bool = False
     answered_turn_id: str
+    current_core_question_index: Optional[int] = None
+    total_core_questions: int = 6
+    interview_phase: str = "core_question"
     next_turn: Optional[InterviewQuestionTurnResponse] = None
 
 
@@ -212,6 +233,7 @@ class InterviewSessionListItemResponse(BaseModel):
     target_role: str
     seniority_level: str
     interview_focus: str
+    preferred_language: str = "en"
     practice_mode: str
     status: str
     overall_score: Optional[int] = None

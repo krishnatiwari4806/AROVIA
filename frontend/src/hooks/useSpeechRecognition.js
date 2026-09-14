@@ -2,14 +2,36 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { getAroviaSettings } from '../services/settingsManager';
 
 /**
- * Browser-native Speech-to-Text (STT) hook using window.webkitSpeechRecognition / SpeechRecognition.
- * Dynamically applies language preferences from centralized settings.
+ * Maps session preferred language to browser speech recognition BCP-47 locale.
+ * en -> en-US
+ * hi -> hi-IN
+ * hinglish -> hi-IN (code-switching uses hi-IN locale)
  */
-export function useSpeechRecognition({ onTranscriptUpdate } = {}) {
+export function getSpeechRecognitionLocale(preferredLanguage) {
+  const lang = (preferredLanguage || '').toLowerCase().trim();
+  if (lang === 'hi' || lang === 'hinglish') {
+    return 'hi-IN';
+  }
+  return 'en-US';
+}
+
+/**
+ * Browser-native Speech-to-Text (STT) hook using window.webkitSpeechRecognition / SpeechRecognition.
+ * Dynamically applies session language preferences and centralized settings.
+ */
+export function useSpeechRecognition({ onTranscriptUpdate, preferredLanguage } = {}) {
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState(null);
   const [isSupported, setIsSupported] = useState(false);
   const recognitionRef = useRef(null);
+  const preferredLanguageRef = useRef(preferredLanguage);
+
+  useEffect(() => {
+    preferredLanguageRef.current = preferredLanguage;
+    if (recognitionRef.current && preferredLanguage) {
+      recognitionRef.current.lang = getSpeechRecognitionLocale(preferredLanguage);
+    }
+  }, [preferredLanguage]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -21,7 +43,9 @@ export function useSpeechRecognition({ onTranscriptUpdate } = {}) {
         recognition.interimResults = true;
 
         const settings = getAroviaSettings();
-        recognition.lang = settings.languageVoice?.language || 'en-US';
+        recognition.lang = preferredLanguageRef.current
+          ? getSpeechRecognitionLocale(preferredLanguageRef.current)
+          : (settings.languageVoice?.language || 'en-US');
 
         recognition.onresult = (event) => {
           let currentTranscript = '';
@@ -69,7 +93,9 @@ export function useSpeechRecognition({ onTranscriptUpdate } = {}) {
     if (recognitionRef.current && !isListening) {
       try {
         // Refresh language preference before starting
-        recognitionRef.current.lang = settings.languageVoice?.language || 'en-US';
+        recognitionRef.current.lang = preferredLanguageRef.current
+          ? getSpeechRecognitionLocale(preferredLanguageRef.current)
+          : (settings.languageVoice?.language || 'en-US');
         recognitionRef.current.start();
         setIsListening(true);
       } catch (err) {

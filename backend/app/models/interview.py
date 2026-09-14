@@ -46,6 +46,9 @@ class InterviewSession(CommonModelMixin, Base):
     practice_mode: Mapped[str] = mapped_column(
         String(50), nullable=False, default="full"
     )
+    preferred_language: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="en", server_default="en"
+    )
     planned_core_questions: Mapped[int] = mapped_column(
         Integer, nullable=False, default=6
     )

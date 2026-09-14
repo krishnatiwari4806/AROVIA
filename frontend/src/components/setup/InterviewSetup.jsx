@@ -68,6 +68,19 @@ export function InterviewSetup({ practiceIntent = null, onStartInterview, onBack
     return savedSettings.defaultSessionMode || 'standard';
   };
 
+  const getInitialLanguage = () => {
+    if (practiceIntent?.preferred_language) {
+      return practiceIntent.preferred_language;
+    }
+    return savedSettings.defaultLanguage || 'en';
+  };
+
+  const languageOptions = [
+    { id: 'en', label: 'English' },
+    { id: 'hi', label: 'Hindi' },
+    { id: 'hinglish', label: 'Hinglish' },
+  ];
+
   const [rolePreset, setRolePreset] = useState(getInitialRole);
   const [customRole, setCustomRole] = useState(
     practiceIntent?.target_role && !roles.some((r) => r.toLowerCase() === practiceIntent.target_role.toLowerCase())
@@ -75,6 +88,7 @@ export function InterviewSetup({ practiceIntent = null, onStartInterview, onBack
       : ''
   );
   const [seniorityLevel, setSeniorityLevel] = useState(getInitialSeniority);
+  const [preferredLanguage, setPreferredLanguage] = useState(getInitialLanguage);
   const [jobDescription, setJobDescription] = useState('');
   const [primaryFocus, setPrimaryFocus] = useState(getInitialFocus);
   const [sessionMode, setSessionMode] = useState(getInitialMode);
@@ -115,21 +129,13 @@ export function InterviewSetup({ practiceIntent = null, onStartInterview, onBack
     async function loadResume() {
       try {
         const res = await api.getMyResume();
-        if (res && res.id) {
+        if (res && (res.id || res.filename)) {
           setParsedResume(res);
         } else {
-          setParsedResume({
-            filename: 'john_doe_resume_v2.pdf',
-            size_mb: 2.4,
-            parsed_summary: '5+ years backend systems engineering & distributed caching',
-          });
+          setParsedResume(null);
         }
       } catch {
-        setParsedResume({
-          filename: 'john_doe_resume_v2.pdf',
-          size_mb: 2.4,
-          parsed_summary: '5+ years backend systems engineering & distributed caching',
-        });
+        setParsedResume(null);
       }
     }
     loadResume();
@@ -153,15 +159,15 @@ export function InterviewSetup({ practiceIntent = null, onStartInterview, onBack
       setIsUploadingResume(true);
       setError(null);
       const res = await api.uploadResume(file);
-      setParsedResume(res || {
-        filename: file.name,
-        size_mb: (file.size / (1024 * 1024)).toFixed(1),
-      });
+      const uploaded = res?.resume || res;
+      if (uploaded && (uploaded.id || uploaded.filename)) {
+        setParsedResume(uploaded);
+      } else {
+        setParsedResume(null);
+      }
     } catch (err) {
-      setParsedResume({
-        filename: file.name,
-        size_mb: (file.size / (1024 * 1024)).toFixed(1),
-      });
+      setError(err?.message || 'Failed to upload resume. Please verify the document format.');
+      setParsedResume(null);
     } finally {
       setIsUploadingResume(false);
     }
@@ -171,6 +177,11 @@ export function InterviewSetup({ practiceIntent = null, onStartInterview, onBack
     try {
       setCreatingSession(true);
       setError(null);
+
+      if (!parsedResume) {
+        setError('Please upload your resume to continue.');
+        return;
+      }
 
       const targetRoleTitle = rolePreset === 'Custom Role' && customRole ? customRole : rolePreset;
       const normSeniority = seniorityLevel.toLowerCase();
@@ -199,6 +210,7 @@ export function InterviewSetup({ practiceIntent = null, onStartInterview, onBack
         target_role: targetRoleTitle,
         seniority_level: seniorityCode,
         interview_focus: focusCode,
+        preferred_language: preferredLanguage,
         practice_mode: sessionMode === 'quick' ? 'quick' : 'full',
         custom_job_desc: jobDescription.trim() || undefined,
         focus_skills: uniqueSkills,
@@ -323,6 +335,22 @@ export function InterviewSetup({ practiceIntent = null, onStartInterview, onBack
                 </select>
               </div>
             </div>
+
+            <div className="card-section">
+              <label className="field-label">PREFERRED INTERVIEW LANGUAGE</label>
+              <div className="role-presets-pill-grid">
+                {languageOptions.map((lang) => (
+                  <button
+                    key={lang.id}
+                    type="button"
+                    className={`role-pill-btn ${preferredLanguage === lang.id ? 'active' : ''}`}
+                    onClick={() => setPreferredLanguage(lang.id)}
+                  >
+                    {lang.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
           {/* Card 2: Contextual Data (Side-by-Side on Desktop: JD left, Resume right) */}
@@ -359,13 +387,27 @@ export function InterviewSetup({ practiceIntent = null, onStartInterview, onBack
                     <div className="resume-info">
                       <span className="resume-filename">{parsedResume.filename}</span>
                       <span className="resume-meta">
-                        {parsedResume.size_mb ? `${parsedResume.size_mb} MB • ` : ''}Successfully parsed
+                        {parsedResume.file_size
+                          ? `${(parsedResume.file_size / (1024 * 1024)).toFixed(1)} MB • `
+                          : parsedResume.size_mb
+                          ? `${parsedResume.size_mb} MB • `
+                          : ''}
+                        {parsedResume.parsed_data?.skills?.length
+                          ? `${parsedResume.parsed_data.skills.length} skills parsed`
+                          : 'Successfully parsed'}
                       </span>
                     </div>
                     <button
                       type="button"
                       className="remove-resume-btn"
-                      onClick={() => setParsedResume(null)}
+                      onClick={async () => {
+                        setParsedResume(null);
+                        try {
+                          await api.deleteResume();
+                        } catch {
+                          // ignore
+                        }
+                      }}
                       title="Change resume"
                     >
                       <X size={14} />

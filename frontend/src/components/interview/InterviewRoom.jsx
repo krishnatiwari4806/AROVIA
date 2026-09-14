@@ -48,7 +48,10 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
     toggleListening,
     isListening,
     isSupported: isSttSupported,
-  } = useSpeechRecognition({ onTranscriptUpdate: handleTranscript });
+  } = useSpeechRecognition({
+    onTranscriptUpdate: handleTranscript,
+    preferredLanguage: session?.preferred_language,
+  });
 
   const initRoom = useCallback(async () => {
     if (!sessionId) {
@@ -354,9 +357,23 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
     );
   }
 
-  const turnNumber = currentTurn?.turn_index !== undefined ? currentTurn.turn_index + 1 : 1;
-  const totalTurns = session?.planned_core_questions || session?.total_planned_turns || 6;
-  const progressPercent = Math.min(100, Math.round((turnNumber / totalTurns) * 100));
+  const isIntro = currentTurn?.interview_phase === 'introduction' || currentTurn?.question_type === 'introduction';
+  const isFollowUp = currentTurn?.interview_phase === 'follow_up' || currentTurn?.is_follow_up;
+  const coreNumber = currentTurn?.core_question_number || (currentTurn?.core_question_index !== undefined && currentTurn?.core_question_index !== null ? currentTurn.core_question_index + 1 : 1);
+  const totalCore = currentTurn?.total_core_questions || session?.planned_core_questions || 6;
+  const followUpNum = currentTurn?.follow_up_number || 1;
+
+  let trackerText = `QUESTION ${coreNumber} OF ${totalCore}`;
+  let progressPercent = Math.min(100, Math.round((coreNumber / totalCore) * 100));
+
+  if (isIntro) {
+    trackerText = 'INTRODUCTION • WARM-UP';
+    progressPercent = 5;
+  } else if (isFollowUp) {
+    trackerText = `QUESTION ${coreNumber} OF ${totalCore} • FOLLOW-UP PROBE #${followUpNum}`;
+    progressPercent = Math.min(100, Math.round((coreNumber / totalCore) * 100));
+  }
+
   const roleName = session?.target_role || 'Technical Interview Session';
   const seniorityLabel = session?.seniority_level?.toUpperCase() || 'SENIOR';
   const focusLabel = session?.interview_focus?.toUpperCase() || 'TECHNICAL CORE';
@@ -381,7 +398,7 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
         <div className="turn-progress-tracker">
           <div className="tracker-label-row">
             <span className="tracker-text">
-              QUESTION {turnNumber} OF {totalTurns}
+              {trackerText}
             </span>
           </div>
           <div className="tracker-bar-track">
@@ -416,11 +433,19 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
                 {isSpeaking ? 'AROVIA IS SPEAKING' : isListening ? 'AROVIA IS LISTENING' : 'AROVIA IS ASKING'}
               </span>
               <div className="question-tag-pills">
-                <span className="tag-pill">
-                  {currentTurn?.category || currentTurn?.primary_concept || 'Technical Core'}
-                </span>
-                {currentTurn?.is_follow_up && (
-                  <span className="tag-pill follow-up-pill">Follow-up Probing</span>
+                {isIntro ? (
+                  <span className="tag-pill cyan-pill">Conversational Warm-up</span>
+                ) : (
+                  <>
+                    <span className="tag-pill">
+                      {currentTurn?.category || currentTurn?.primary_concept || 'Technical Core'}
+                    </span>
+                    {isFollowUp ? (
+                      <span className="tag-pill follow-up-pill">Follow-up Probe #{followUpNum}</span>
+                    ) : (
+                      <span className="tag-pill">Core Question #{coreNumber}</span>
+                    )}
+                  </>
                 )}
               </div>
             </div>
