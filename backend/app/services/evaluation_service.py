@@ -266,6 +266,52 @@ class EvaluationService:
                 },
             }
 
+        # 5b. Follow-Up Remediation Linking (Phase 4.5)
+        # Link follow-up turns to parent turn gaps for explanatory continuity
+        for turn in answered_turns:
+            if turn.is_follow_up or turn.question_type == "follow_up" or turn.parent_turn_id:
+                parent_turn = None
+                if turn.parent_turn_id:
+                    parent_turn = next((t for t in answered_turns if t.id == turn.parent_turn_id), None)
+                if not parent_turn:
+                    # Fallback to preceding core turn
+                    prior_turns = [
+                        t for t in answered_turns
+                        if t.turn_index < turn.turn_index and not t.is_follow_up and t.question_type != "introduction"
+                    ]
+                    if prior_turns:
+                        parent_turn = prior_turns[-1]
+
+                if parent_turn and parent_turn.evaluation_data:
+                    parent_missed = parent_turn.evaluation_data.get("missed_concepts", [])
+                    followup_covered = (turn.evaluation_data or {}).get("covered_concepts", [])
+                    remediated = []
+                    for p_miss in parent_missed:
+                        p_norm = p_miss.lower().strip()
+                        for f_cov in followup_covered:
+                            f_norm = f_cov.lower().strip()
+                            if p_norm in f_norm or f_norm in p_norm:
+                                remediated.append(p_miss)
+                                break
+
+                    if turn.evaluation_data is None:
+                        turn.evaluation_data = {}
+
+                    if remediated:
+                        turn.evaluation_data["remediated_parent_concepts"] = remediated
+                        turn.evaluation_data["remediation_note"] = (
+                            f"Initial answer to Core Question (Turn {parent_turn.turn_index}) missed {', '.join(remediated)}. "
+                            f"During follow-up, candidate successfully demonstrated an understanding of this concept."
+                        )
+                        parent_turn.evaluation_data["remediated_in_followup"] = {
+                            "followup_turn_index": turn.turn_index,
+                            "remediated_concepts": remediated,
+                            "note": f"Demonstrated in Follow-up (Turn {turn.turn_index}): {', '.join(remediated)}",
+                        }
+                    else:
+                        turn.evaluation_data["remediated_parent_concepts"] = []
+                        turn.evaluation_data["remediation_note"] = "Follow-up did not remediate the core conceptual gap."
+
         # 6. Calculate Session Aggregates (Radar Metrics + Overall Score)
         n = len(answered_turns)
         all_zero_turns = all((t.turn_score or 0) == 0 for t in answered_turns)
@@ -456,6 +502,10 @@ class EvaluationService:
                     turn_feedback=t_eval.get("turn_feedback"),
                     answer_quality_tier=tier_enum,
                     classification_reason=t_eval.get("classification_reason"),
+                    is_follow_up=bool(t.is_follow_up) if isinstance(getattr(t, "is_follow_up", None), bool) else False,
+                    parent_turn_id=str(t.parent_turn_id) if isinstance(getattr(t, "parent_turn_id", None), str) else None,
+                    remediation_note=t_eval.get("remediation_note") if isinstance(t_eval.get("remediation_note"), str) else None,
+                    remediated_parent_concepts=t_eval.get("remediated_parent_concepts", []) if isinstance(t_eval.get("remediated_parent_concepts"), list) else [],
                 )
             )
 
