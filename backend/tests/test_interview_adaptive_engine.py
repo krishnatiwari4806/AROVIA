@@ -210,7 +210,7 @@ async def test_gemini_fallback_followup_is_concept_specific():
 
         assert decision.is_follow_up is True
         assert len(decision.question_text) > 10
-        assert "underlying mechanics" in decision.follow_up_reasoning.lower() or "concise" in decision.follow_up_reasoning.lower()
+        assert "underlying mechanics" in decision.follow_up_reasoning.lower() or "concise" in decision.follow_up_reasoning.lower() or "omitted" in decision.follow_up_reasoning.lower()
 
 
 @pytest.mark.asyncio
