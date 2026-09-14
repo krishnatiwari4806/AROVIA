@@ -1,15 +1,220 @@
 """Multi-Dimensional Evaluation and Scoring Pydantic v2 DTO schemas."""
 
 from datetime import datetime
+from enum import Enum
 from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class AnswerQualityTier(str, Enum):
+    """Authoritative quality tier classification for candidate interview answers."""
+
+    STRONG = "strong"
+    PARTIAL = "partial"
+    WEAK = "weak"
+    INCORRECT = "incorrect"
+    IRRELEVANT = "irrelevant"
+    NON_ANSWER = "non_answer"
+    PASS = "pass"
+    EMPTY = "empty"
+
+
+class AnswerClassificationResult(BaseModel):
+    """Structured deterministic or semantic answer classification result."""
+
+    answer_quality_tier: AnswerQualityTier = Field(
+        ..., description="Authoritative quality tier assigned to the answer."
+    )
+    normalized_answer: str = Field(
+        ..., description="Normalized answer text (cleaned whitespace, punctuation stripped for comparison)."
+    )
+    is_non_answer: bool = Field(
+        default=False, description="True if answer is an explicit admission of not knowing, passing, or skipping."
+    )
+    is_empty: bool = Field(
+        default=False, description="True if answer is blank, whitespace-only, or missing."
+    )
+    is_short_but_valid: bool = Field(
+        default=False, description="True if answer is concise (e.g. 1-4 words) but contains valid technical content."
+    )
+    classification_reason: str = Field(
+        ..., description="Deterministic or semantic justification for this classification."
+    )
+    confidence: float = Field(
+        default=1.0, ge=0.0, le=1.0, description="Confidence in classification decision (0.0 to 1.0), distinct from candidate speech confidence."
+    )
+    evidence: List[str] = Field(
+        default_factory=list, description="Specific terms, triggers, or concept matches supporting classification."
+    )
+
+
+class ConceptImportance(str, Enum):
+    """Importance weighting tier for an evaluated technical or behavioral concept."""
+
+    CORE = "core"
+    SUPPORTING = "supporting"
+
+
+class ExpectedConcept(BaseModel):
+    """Structured technical/behavioral concept expected in an ideal response."""
+
+    concept: str = Field(..., description="Short canonical name of the expected concept or pattern.")
+    importance: ConceptImportance = Field(
+        default=ConceptImportance.CORE,
+        description="Importance level: 'core' (essential) or 'supporting' (depth/nuance).",
+    )
+    description: Optional[str] = Field(
+        None, description="Brief explanation of what understanding should be demonstrated."
+    )
+
+
+class EvidenceCategory(str, Enum):
+    """Classification of candidate evidence relative to expected concepts and reference knowledge."""
+
+    SUPPORTED = "supported"
+    MISSING = "missing"
+    CONTRADICTED = "contradicted"
+    IRRELEVANT = "irrelevant"
+    UNSUPPORTED = "unsupported"
+
+
+class ConceptEvidence(BaseModel):
+    """Evidence mapping candidate response statements to expected concepts."""
+
+    concept: str = Field(..., description="The evaluated concept name.")
+    importance: ConceptImportance = Field(
+        default=ConceptImportance.CORE, description="Importance level of the concept."
+    )
+    evidence_status: EvidenceCategory = Field(
+        ..., description="Evidence status: supported, missing, contradicted, irrelevant, unsupported."
+    )
+    candidate_quote: Optional[str] = Field(
+        None, description="Verbatim or summarized quote from candidate answer demonstrating the evidence."
+    )
+    notes: Optional[str] = Field(
+        None, description="Evaluator note explaining the evidence classification."
+    )
+
+
+class EvaluationRubric(BaseModel):
+    """Structured, explainable evaluation rubric calibrated for a specific question intent."""
+
+    question_intent: str = Field(
+        ..., description="Intent classification (e.g. project_deep_dive, core_skill, scenario, behavioral)."
+    )
+    expected_knowledge: str = Field(
+        ..., description="Summary of domain knowledge and mechanics evaluated in this question."
+    )
+    expected_concepts: List[ExpectedConcept] = Field(
+        default_factory=list, description="Structured expected concepts list with core/supporting tiers."
+    )
+    strong_indicators: List[str] = Field(
+        default_factory=list, description="Key characteristics of a STRONG / complete response."
+    )
+    partial_indicators: List[str] = Field(
+        default_factory=list, description="Characteristics of a PARTIAL response with conceptual gaps."
+    )
+    weak_indicators: List[str] = Field(
+        default_factory=list, description="Indicators of a WEAK or shallow response."
+    )
+    incorrect_indicators: List[str] = Field(
+        default_factory=list, description="Specific factual contradictions or anti-patterns."
+    )
+    irrelevant_indicators: List[str] = Field(
+        default_factory=list, description="Signs that the response addresses an unrelated topic."
+    )
+
+
+class QuestionReferencePayload(BaseModel):
+    """Complete authoritative reference answer, expected concepts, and rubric container for a question."""
+
+    question_id: Optional[str] = Field(None, description="Canonical Question Bank ID if applicable.")
+    question_text: str = Field(..., description="The exact question text asked to the candidate.")
+    question_intent: str = Field(
+        default="core_skill", description="Strategic question intent (project, core_skill, scenario, behavioral, etc.)."
+    )
+    reference_answer: str = Field(
+        ..., description="Benchmark senior technical or behavioral response for this specific question."
+    )
+    primary_concept: str = Field(
+        ..., description="Primary domain competency or architectural topic evaluated."
+    )
+    expected_concepts: List[ExpectedConcept] = Field(
+        default_factory=list, description="Authoritative list of expected concepts with importance tiers."
+    )
+    rubric: Optional[EvaluationRubric] = Field(
+        None, description="Intent-calibrated evaluation rubric for this question."
+    )
+    source: str = Field(
+        default="curated_deterministic",
+        description="Source of reference payload: 'question_bank', 'curated_deterministic', 'planner_archetype', 'gemini_validated'.",
+    )
+    is_candidate_specific: bool = Field(
+        default=False,
+        description="True if question was grounded in candidate resume/JD rather than a static question bank.",
+    )
+
+
+class CompletenessLevel(str, Enum):
+    """Assessment of whether an answer sufficiently covers what the question asked."""
+
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    INSUFFICIENT = "insufficient"
+    NONE = "none"
+
+
+class SemanticEvaluationResult(BaseModel):
+    """Complete semantic evaluation outcome for a single candidate answer against a question reference."""
+
+    is_relevant: bool = Field(..., description="True if answer directly and substantively addresses the question.")
+    relevance_reason: str = Field(..., description="Evidence justification for relevance decision.")
+    is_correct: bool = Field(..., description="True if technical claims are accurate without material factual contradictions.")
+    correctness_reason: str = Field(..., description="Evidence justification for technical correctness.")
+    completeness: CompletenessLevel = Field(
+        default=CompletenessLevel.PARTIAL,
+        description="Degree to which core and supporting concepts are addressed (complete, partial, insufficient, none).",
+    )
+    completeness_reason: str = Field(..., description="Evidence justification for completeness assessment.")
+    concept_evidence: List[ConceptEvidence] = Field(
+        default_factory=list, description="Granular evidence mapping per expected concept."
+    )
+    covered_concepts: List[str] = Field(
+        default_factory=list, description="List of expected concept names verified as SUPPORTED."
+    )
+    missed_concepts: List[str] = Field(
+        default_factory=list, description="List of expected concept names categorized as MISSING."
+    )
+    contradicted_claims: List[str] = Field(
+        default_factory=list, description="Specific candidate statements that contradict technical domain facts."
+    )
+    unsupported_claims: List[str] = Field(
+        default_factory=list, description="Claims made by candidate that lack supporting domain evidence."
+    )
+    assigned_tier: AnswerQualityTier = Field(
+        ..., description="Recommended quality tier derived from semantic evidence."
+    )
+    classification_reason: str = Field(
+        ..., description="Comprehensive justification combining relevance, correctness, and completeness."
+    )
+    reference_answer: Optional[str] = Field(
+        default=None, description="Authoritative reference answer used as baseline for evaluation."
+    )
 
 
 class TurnEvaluationItem(BaseModel):
     """Granular multi-dimensional evaluation for an individual interview question turn."""
 
     turn_index: int = Field(..., description="Zero-based index of the evaluated turn.")
+    answer_quality_tier: AnswerQualityTier = Field(
+        default=AnswerQualityTier.STRONG,
+        description="Authoritative quality tier assigned to the candidate's answer.",
+    )
+    classification_reason: Optional[str] = Field(
+        None,
+        description="Concise justification for the answer quality tier classification.",
+    )
     relevance_score: int = Field(
         ..., ge=0, le=100, description="Relevance and direct prompt alignment score (0-100)."
     )
@@ -41,6 +246,27 @@ class TurnEvaluationItem(BaseModel):
     missed_concepts: List[str] = Field(
         default_factory=list,
         description="List of critical concepts or edge-case trade-offs that were omitted.",
+    )
+    expected_concepts: List[ExpectedConcept] = Field(
+        default_factory=list,
+        description="Structured list of expected concepts with importance tiers for this turn.",
+    )
+    concept_evidence: List[ConceptEvidence] = Field(
+        default_factory=list,
+        description="Evidence classification of candidate answer against expected concepts.",
+    )
+    completeness: Optional[CompletenessLevel] = Field(
+        None, description="Degree of concept completeness achieved for this question."
+    )
+    contradicted_claims: List[str] = Field(
+        default_factory=list, description="Specific erroneous or contradictory claims detected in candidate answer."
+    )
+    unsupported_claims: List[str] = Field(
+        default_factory=list, description="Unverified or unsubstantiated claims outside known project context."
+    )
+    reference_answer: Optional[str] = Field(
+        None,
+        description="Authoritative reference benchmark answer for this turn.",
     )
     ideal_answer_comparison: str = Field(
         ...,
@@ -103,7 +329,7 @@ class TurnEvaluationResponse(BaseModel):
     id: str
     session_id: str
     turn_index: int
-    question_type: str
+    question_type: Optional[str] = "technical"
     question_text: str
     candidate_answer: Optional[str] = None
     ideal_answer: Optional[str] = None
@@ -116,8 +342,16 @@ class TurnEvaluationResponse(BaseModel):
     turn_score: Optional[int] = None
     covered_concepts: List[str] = Field(default_factory=list)
     missed_concepts: List[str] = Field(default_factory=list)
+    expected_concepts: List[ExpectedConcept] = Field(default_factory=list)
+    concept_evidence: List[ConceptEvidence] = Field(default_factory=list)
+    completeness: Optional[CompletenessLevel] = None
+    contradicted_claims: List[str] = Field(default_factory=list)
+    unsupported_claims: List[str] = Field(default_factory=list)
+    reference_answer: Optional[str] = None
     ideal_answer_comparison: Optional[str] = None
     turn_feedback: Optional[str] = None
+    answer_quality_tier: Optional[AnswerQualityTier] = None
+    classification_reason: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -129,6 +363,7 @@ class SessionEvaluationReportResponse(BaseModel):
     target_role: str
     seniority_level: str
     interview_focus: str
+    preferred_language: str = "en"
     practice_mode: str
     status: str
     overall_score: int = Field(..., ge=0, le=100, description="Overall composite score (0-100).")
