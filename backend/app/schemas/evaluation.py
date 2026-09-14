@@ -352,6 +352,10 @@ class TurnEvaluationResponse(BaseModel):
     turn_feedback: Optional[str] = None
     answer_quality_tier: Optional[AnswerQualityTier] = None
     classification_reason: Optional[str] = None
+    is_follow_up: Optional[bool] = False
+    parent_turn_id: Optional[str] = None
+    remediation_note: Optional[str] = None
+    remediated_parent_concepts: List[str] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 
