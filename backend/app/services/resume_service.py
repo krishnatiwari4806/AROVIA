@@ -189,6 +189,14 @@ class ResumeService:
             ]
         if update_data.summary is not None:
             current_parsed["summary"] = update_data.summary
+        if update_data.projects is not None:
+            current_parsed["projects"] = [
+                item.model_dump() for item in update_data.projects
+            ]
+        if update_data.work_history is not None:
+            current_parsed["work_history"] = [
+                item.model_dump() for item in update_data.work_history
+            ]
 
         # Validate with schema
         validated = ParsedResumeData.model_validate(current_parsed)

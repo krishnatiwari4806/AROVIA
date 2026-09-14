@@ -19,15 +19,169 @@ from app.schemas.interview import (
     TurnAnswerSubmissionRequest,
     TurnAnswerSubmissionResponse,
 )
-from app.services.gemini_service import GeminiService, get_gemini_service
+from app.services.candidate_context import CandidateContext, build_candidate_context
+from app.services.gemini_service import (
+    GeminiService,
+    get_fallback_followup,
+    get_gemini_service,
+    get_grounded_fallback_question,
+)
 from app.services.interview_presets import ROLE_PRESETS
 from app.services.question_bank import (
     get_competency_stages,
-    get_fallback_followup,
     get_fallback_question,
+)
+from app.services.question_planner import (
+    QuestionIntent,
+    QuestionPlan,
+    QuestionPlanner,
+    get_question_planner,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def get_introduction_prompt(
+    preferred_language: str = "en",
+    target_role: str = "Software Engineer",
+    seniority_level: str = "mid",
+) -> str:
+    """Generate conversational Turn 0 introduction warm-up prompt respecting preferred language."""
+    lang = (preferred_language or "en").lower().strip()
+    role = target_role or "Software Engineer"
+    seniority = seniority_level.capitalize() if seniority_level else "Mid-level"
+
+    if lang == "hi":
+        return (
+            f"Namaste! AROVIA mock interview platform par aapka swagat hai. Hum {seniority} {role} "
+            f"position ke liye technical assessment shuru karenge. Technical discussion shuru karne se pehle, "
+            f"kya aap briefly apna introduction de sakte hain aur apne engineering background ke baare mein bata sakte hain?"
+        )
+    elif lang == "hinglish":
+        return (
+            f"Hi, welcome to AROVIA! We are setting up your mock interview for the {seniority} {role} "
+            f"position. Technical discussion start karne se pehle, could you briefly introduce yourself "
+            f"and share a quick overview of your engineering background and key technical focus?"
+        )
+    else:
+        return (
+            f"Hi, welcome to AROVIA! We are getting ready for your mock interview for the {seniority} {role} "
+            f"position. Before we dive into the technical discussion, could you briefly introduce yourself "
+            f"and share a quick overview of your background and core technical focus?"
+        )
+
+
+def compute_turn_metadata(
+    session: InterviewSession,
+    turn: InterviewQuestionTurn,
+    all_turns: List[InterviewQuestionTurn],
+) -> dict:
+    """Compute authoritative turn progression metadata distinguishing Turn 0, core questions, and follow-ups."""
+    total_core = session.planned_core_questions or 6
+
+    # 1. Turn 0 / Introduction
+    if turn.question_type == "introduction" or (turn.turn_index == 0 and turn.question_type == "introduction"):
+        return {
+            "core_question_index": None,
+            "core_question_number": None,
+            "total_core_questions": total_core,
+            "follow_up_number": 0,
+            "interview_phase": "introduction",
+        }
+
+    # Identify all core questions in chronological order
+    core_turns = [
+        t for t in all_turns
+        if t.question_type == "core" or (not t.is_follow_up and t.question_type != "introduction")
+    ]
+
+    # 2. Follow-up Turn
+    if turn.is_follow_up or turn.question_type == "follow_up":
+        parent_core = None
+        if turn.parent_turn_id:
+            parent_core = next((t for t in all_turns if t.id == turn.parent_turn_id), None)
+        if not parent_core:
+            parent_core = next(
+                (
+                    t for t in reversed(all_turns)
+                    if t.turn_index < turn.turn_index
+                    and (t.question_type == "core" or (not t.is_follow_up and t.question_type != "introduction"))
+                ),
+                None,
+            )
+
+        if parent_core:
+            parent_core_k = next(
+                (i + 1 for i, t in enumerate(core_turns) if t.id == parent_core.id or t.turn_index == parent_core.turn_index),
+                1,
+            )
+            followups_for_parent = [
+                t for t in all_turns
+                if (t.is_follow_up or t.question_type == "follow_up")
+                and (
+                    t.parent_turn_id == parent_core.id
+                    or (not t.parent_turn_id and t.turn_index > parent_core.turn_index)
+                )
+            ]
+            fu_num = next(
+                (i + 1 for i, t in enumerate(followups_for_parent) if t.id == turn.id or t.turn_index == turn.turn_index),
+                1,
+            )
+        else:
+            parent_core_k = 1
+            fu_num = 1
+
+        return {
+            "core_question_index": parent_core_k - 1,
+            "core_question_number": parent_core_k,
+            "total_core_questions": total_core,
+            "follow_up_number": fu_num,
+            "interview_phase": "follow_up",
+        }
+
+    # 3. Core Question Turn
+    core_k = next(
+        (i + 1 for i, t in enumerate(core_turns) if t.id == turn.id or t.turn_index == turn.turn_index),
+        len(core_turns) if core_turns else 1,
+    )
+    return {
+        "core_question_index": core_k - 1,
+        "core_question_number": core_k,
+        "total_core_questions": total_core,
+        "follow_up_number": 0,
+        "interview_phase": "core_question",
+    }
+
+
+def build_turn_response(
+    turn: InterviewQuestionTurn,
+    session: InterviewSession,
+    all_turns: Optional[List[InterviewQuestionTurn]] = None,
+) -> InterviewQuestionTurnResponse:
+    """Build an InterviewQuestionTurnResponse enriched with authoritative progression metadata."""
+    if all_turns is None:
+        all_turns = [turn]
+
+    meta = compute_turn_metadata(session, turn, all_turns)
+
+    return InterviewQuestionTurnResponse(
+        id=turn.id,
+        session_id=turn.session_id,
+        turn_index=turn.turn_index,
+        question_type=turn.question_type,
+        question_text=turn.question_text,
+        candidate_answer=turn.candidate_answer,
+        is_follow_up=turn.is_follow_up,
+        parent_turn_id=turn.parent_turn_id,
+        ideal_answer=turn.ideal_answer,
+        turn_duration_sec=turn.turn_duration_sec,
+        core_question_index=meta["core_question_index"],
+        core_question_number=meta["core_question_number"],
+        total_core_questions=meta["total_core_questions"],
+        follow_up_number=meta["follow_up_number"],
+        interview_phase=meta["interview_phase"],
+        created_at=turn.created_at,
+    )
 
 
 def _normalize_question_text(text: Optional[str]) -> str:
@@ -86,12 +240,13 @@ class InterviewService:
             )
 
         # 2. Practice mode turn calibration
+        # Turn 0 is intro + planned_core core questions + follow-ups
         if request.practice_mode == PracticeMode.quick:
             planned_core = 3
-            max_turns = 5
+            max_turns = 6  # 1 intro + 3 core + up to 2 follow-ups
         else:
             planned_core = 6
-            max_turns = 9
+            max_turns = 10  # 1 intro + 6 core + up to 3 follow-ups
 
         # 3. Sanitize and parse Job Description if provided
         sanitized_jd = sanitize_job_description(request.custom_job_desc)
@@ -118,12 +273,19 @@ class InterviewService:
         resume_id = resume.id if resume else None
 
         # 6. Instantiate and persist session
+        preferred_lang = (
+            request.preferred_language.value
+            if hasattr(request.preferred_language, "value")
+            else str(request.preferred_language or "en")
+        )
+
         session = InterviewSession(
             user_id=current_user.id,
             resume_id=resume_id,
             target_role=request.target_role.strip(),
             seniority_level=request.seniority_level.value,
             interview_focus=request.interview_focus.value,
+            preferred_language=preferred_lang,
             custom_job_desc=sanitized_jd,
             parsed_jd_data=parsed_jd_data,
             focus_skills=focus_skills,
@@ -198,7 +360,7 @@ class InterviewService:
     async def start_interview(
         self, db: AsyncSession, current_user: User, session_id: str
     ) -> InterviewQuestionTurn:
-        """Initialize interview turn loop by generating Turn 0 (Initial Question).
+        """Initialize interview turn loop by generating Turn 0 (Introduction / Warm-up).
 
         Idempotent: If turn 0 already exists, returns existing turn 0.
         """
@@ -223,43 +385,20 @@ class InterviewService:
         if existing_turns:
             return existing_turns[0]
 
-        # Load resume data if attached
-        resume_data = None
-        if session.resume_id:
-            res_query = select(Resume).where(Resume.id == session.resume_id)
-            res_result = await db.execute(res_query)
-            res_record = res_result.scalars().first()
-            if res_record and res_record.parsed_data:
-                resume_data = res_record.parsed_data
-
-        # Generate initial core question via Gemini
-        generated = await self.gemini_service.generate_initial_question(
+        # Generate Turn 0 conversational introduction warm-up prompt respecting preferred_language
+        pref_lang = getattr(session, "preferred_language", "en") or "en"
+        intro_text = get_introduction_prompt(
+            preferred_language=pref_lang,
             target_role=session.target_role,
             seniority_level=session.seniority_level,
-            interview_focus=session.interview_focus,
-            focus_skills=session.focus_skills,
-            parsed_jd_data=session.parsed_jd_data,
-            resume_data=resume_data,
         )
-
-        q_text = (generated.question_text or "").strip()
-        ideal_ans = generated.ideal_answer or ""
-        if not q_text:
-            fallback_q0 = get_fallback_question(
-                role=session.target_role,
-                seniority=session.seniority_level,
-                focus=session.interview_focus,
-                stage_index=0,
-            )
-            q_text = fallback_q0.question_text
-            ideal_ans = fallback_q0.ideal_answer
 
         turn0 = InterviewQuestionTurn(
             session_id=session.id,
             turn_index=0,
-            question_type="core",
-            question_text=q_text,
-            ideal_answer=ideal_ans,
+            question_type="introduction",
+            question_text=intro_text,
+            ideal_answer="Candidate conversational background and engineering introduction overview.",
             is_follow_up=False,
             parent_turn_id=None,
         )
@@ -319,6 +458,15 @@ class InterviewService:
                 error_code="TURN_NOT_FOUND",
             )
 
+        # 1. Fetch all existing turns in session
+        all_turns_query = (
+            select(InterviewQuestionTurn)
+            .where(InterviewQuestionTurn.session_id == session.id)
+            .order_by(InterviewQuestionTurn.turn_index.asc())
+        )
+        all_turns_res = await db.execute(all_turns_query)
+        all_turns = list(all_turns_res.scalars().all())
+
         if turn.candidate_answer is not None:
             submitted_norm = _normalize_answer_text(request.candidate_answer)
             existing_norm = _normalize_answer_text(turn.candidate_answer)
@@ -330,6 +478,7 @@ class InterviewService:
                 )
 
             # Idempotent retry with identical answer: determine existing state without re-running LLM or generating turns
+            turn_meta = compute_turn_metadata(session, turn, all_turns)
             if session.status in ("evaluating", "completed"):
                 return TurnAnswerSubmissionResponse(
                     session_id=session.id,
@@ -337,27 +486,26 @@ class InterviewService:
                     session_status=session.status,
                     is_interview_complete=True,
                     answered_turn_id=turn.id,
+                    current_core_question_index=turn_meta["core_question_index"],
+                    total_core_questions=session.planned_core_questions,
+                    interview_phase="completed",
                     next_turn=None,
                 )
-
-            all_turns_query = (
-                select(InterviewQuestionTurn)
-                .where(InterviewQuestionTurn.session_id == session.id)
-                .order_by(InterviewQuestionTurn.turn_index.asc())
-            )
-            all_turns_res = await db.execute(all_turns_query)
-            all_turns = all_turns_res.scalars().all()
 
             next_turns = [t for t in all_turns if t.turn_index > turn.turn_index]
             if next_turns:
                 next_turn = next_turns[0]
+                next_meta = compute_turn_metadata(session, next_turn, all_turns)
                 return TurnAnswerSubmissionResponse(
                     session_id=session.id,
                     current_turn_index=next_turn.turn_index,
                     session_status=session.status,
                     is_interview_complete=False,
                     answered_turn_id=turn.id,
-                    next_turn=InterviewQuestionTurnResponse.model_validate(next_turn),
+                    current_core_question_index=next_meta["core_question_index"],
+                    total_core_questions=session.planned_core_questions,
+                    interview_phase=next_meta["interview_phase"],
+                    next_turn=build_turn_response(next_turn, session, all_turns),
                 )
         else:
             if session.status != "in_progress":
@@ -365,32 +513,125 @@ class InterviewService:
                     message="Cannot submit answer for an interview that is not in progress."
                 )
 
-            # 1. Update and persist candidate's answer
+            # Persist candidate's answer on the active turn
             turn.candidate_answer = request.candidate_answer.strip()
             turn.turn_duration_sec = request.turn_duration_sec
             await db.flush()
 
-        # 2. Fetch all completed turns in session
-        all_turns_query = (
-            select(InterviewQuestionTurn)
-            .where(InterviewQuestionTurn.session_id == session.id)
-            .order_by(InterviewQuestionTurn.turn_index.asc())
-        )
-        all_turns_res = await db.execute(all_turns_query)
-        all_turns = all_turns_res.scalars().all()
+        # Update turn in local all_turns snapshot
+        for idx, t in enumerate(all_turns):
+            if t.id == turn.id:
+                all_turns[idx] = turn
+                break
 
-        core_turns = [t for t in all_turns if not t.is_follow_up]
-        followup_turns = [t for t in all_turns if t.is_follow_up]
+        # 2. Check if the answered turn was Turn 0 (Introduction warm-up)
+        if turn.question_type == "introduction" or (turn.turn_index == 0 and turn.question_type == "introduction"):
+            # Load resume data if attached
+            resume_data = None
+            if session.resume_id:
+                res_query = select(Resume).where(Resume.id == session.resume_id)
+                res_result = await db.execute(res_query)
+                res_record = res_result.scalars().first()
+                if res_record and res_record.parsed_data:
+                    resume_data = res_record.parsed_data
+            else:
+                res_query = select(Resume).where(Resume.user_id == current_user.id)
+                res_result = await db.execute(res_query)
+                res_record = res_result.scalars().first()
+                if res_record and res_record.parsed_data:
+                    resume_data = res_record.parsed_data
+
+            # Build structured candidate context with Turn 0 intro response
+            candidate_context = build_candidate_context(
+                target_role=session.target_role,
+                seniority_level=session.seniority_level,
+                interview_focus=session.interview_focus,
+                preferred_language=getattr(session, "preferred_language", "en") or "en",
+                resume_data=resume_data,
+                parsed_jd_data=session.parsed_jd_data,
+                focus_skills=session.focus_skills,
+                introduction_response=turn.candidate_answer,
+            )
+
+            planner = get_question_planner()
+            q1_plan = planner.plan_next_question(
+                context=candidate_context,
+                planned_core_questions=session.planned_core_questions,
+                current_core_index=0,
+            )
+
+            # Generate Core Question 1 via Gemini (grounded in candidate context and plan)
+            generated = await self.gemini_service.generate_initial_question(
+                target_role=session.target_role,
+                seniority_level=session.seniority_level,
+                interview_focus=session.interview_focus,
+                focus_skills=session.focus_skills,
+                parsed_jd_data=session.parsed_jd_data,
+                resume_data=resume_data,
+                preferred_language=getattr(session, "preferred_language", "en") or "en",
+                candidate_context=candidate_context,
+                question_plan=q1_plan,
+            )
+
+            q_text = (generated.question_text or "").strip()
+            ideal_ans = generated.ideal_answer or ""
+            if not q_text:
+                fallback_q0 = get_grounded_fallback_question(
+                    context=candidate_context,
+                    plan=q1_plan,
+                    language=getattr(session, "preferred_language", "en") or "en",
+                    stage_index=0,
+                )
+                q_text = fallback_q0.question_text
+                ideal_ans = fallback_q0.ideal_answer
+
+            turn1 = InterviewQuestionTurn(
+                session_id=session.id,
+                turn_index=1,
+                question_type="core",
+                question_text=q_text,
+                ideal_answer=ideal_ans,
+                is_follow_up=False,
+                parent_turn_id=None,
+            )
+
+            session.current_turn_index = 1
+            db.add(turn1)
+            await db.commit()
+            await db.refresh(turn1)
+
+            updated_turns = all_turns + [turn1]
+            return TurnAnswerSubmissionResponse(
+                session_id=session.id,
+                current_turn_index=1,
+                session_status=session.status,
+                is_interview_complete=False,
+                answered_turn_id=turn.id,
+                current_core_question_index=0,
+                total_core_questions=session.planned_core_questions,
+                interview_phase="core_question",
+                next_turn=build_turn_response(turn1, session, updated_turns),
+            )
+
+        # 3. Categorize completed core and follow-up turns
+        core_turns = [
+            t for t in all_turns
+            if t.question_type == "core" or (not t.is_follow_up and t.question_type != "introduction")
+        ]
+        followup_turns = [
+            t for t in all_turns
+            if t.is_follow_up or t.question_type == "follow_up"
+        ]
 
         completed_core = len(core_turns)
         completed_followups = len(followup_turns)
         total_turns = len(all_turns)
 
-        max_followups = max(0, session.max_total_turns - session.planned_core_questions)
+        max_followups = max(0, session.max_total_turns - session.planned_core_questions - 1)
         remaining_core = max(0, session.planned_core_questions - completed_core)
         remaining_followup_budget = max(0, max_followups - completed_followups)
 
-        # 3. Rule 6: Check hard maximum turn boundary
+        # 4. Check hard maximum total turn boundary
         if total_turns >= session.max_total_turns:
             session.status = "evaluating"
             session.completed_at = datetime.now(timezone.utc)
@@ -401,17 +642,20 @@ class InterviewService:
                 session_status=session.status,
                 is_interview_complete=True,
                 answered_turn_id=turn.id,
+                current_core_question_index=max(0, completed_core - 1),
+                total_core_questions=session.planned_core_questions,
+                interview_phase="completed",
                 next_turn=None,
             )
 
-        # 4. Rules 2, 3, 4, 9: Determine follow-up eligibility for the just-answered turn
+        # 5. Determine follow-up eligibility for the just-answered turn
         # A follow-up is ONLY allowed if:
-        # - The current answered turn is a core turn (not a follow-up)
+        # - The current answered turn is a core turn (not a follow-up, and not intro)
         # - The current core turn has not already received a follow-up
         # - Global follow-up budget remains (> 0)
         # - Total turns has not reached max_total_turns
         already_has_followup = any(t.parent_turn_id == turn.id for t in followup_turns)
-        is_current_core = not turn.is_follow_up
+        is_current_core = (turn.question_type == "core" or (not turn.is_follow_up and turn.question_type != "introduction"))
 
         followup_eligible = (
             is_current_core
@@ -420,7 +664,7 @@ class InterviewService:
             and total_turns < session.max_total_turns
         )
 
-        # 5. Check if any next turn is possible:
+        # 6. Check if any next turn is possible:
         # If no follow-up is eligible AND no core questions remain, the interview is complete!
         if not followup_eligible and remaining_core <= 0:
             session.status = "evaluating"
@@ -432,6 +676,9 @@ class InterviewService:
                 session_status=session.status,
                 is_interview_complete=True,
                 answered_turn_id=turn.id,
+                current_core_question_index=max(0, completed_core - 1),
+                total_core_questions=session.planned_core_questions,
+                interview_phase="completed",
                 next_turn=None,
             )
 
@@ -457,7 +704,36 @@ class InterviewService:
                         if _normalize_question_text(f.prompt) == norm_t:
                             excluded_question_ids.add(f.id)
 
-        # 6. Invoke Gemini adaptive evaluator with authoritative state bounds
+        # 7. Construct Candidate Context and Question Plan for upcoming turns
+        resume_data = None
+        if session.resume_id:
+            res_query = select(Resume).where(Resume.id == session.resume_id)
+            res_result = await db.execute(res_query)
+            res_record = res_result.scalars().first()
+            if res_record and res_record.parsed_data:
+                resume_data = res_record.parsed_data
+        else:
+            res_query = select(Resume).where(Resume.user_id == current_user.id)
+            res_result = await db.execute(res_query)
+            res_record = res_result.scalars().first()
+            if res_record and res_record.parsed_data:
+                resume_data = res_record.parsed_data
+
+        intro_turn = next((t for t in all_turns if t.question_type == "introduction" or t.turn_index == 0), None)
+        intro_ans = intro_turn.candidate_answer if intro_turn else None
+
+        candidate_context = build_candidate_context(
+            target_role=session.target_role,
+            seniority_level=session.seniority_level,
+            interview_focus=session.interview_focus,
+            preferred_language=getattr(session, "preferred_language", "en") or "en",
+            resume_data=resume_data,
+            parsed_jd_data=session.parsed_jd_data,
+            focus_skills=session.focus_skills,
+            introduction_response=intro_ans,
+        )
+
+        covered_topics = [t.question_text for t in all_turns if t.question_text]
         transcript_history = [
             {
                 "turn_index": t.turn_index,
@@ -468,6 +744,16 @@ class InterviewService:
             for t in all_turns
         ]
 
+        planner = get_question_planner()
+        next_core_plan = planner.plan_next_question(
+            context=candidate_context,
+            planned_core_questions=session.planned_core_questions,
+            current_core_index=completed_core,
+            covered_topics=covered_topics,
+            previous_turns=transcript_history,
+        )
+
+        # Invoke Gemini adaptive evaluator with Candidate Context, Planner, and authoritative state bounds
         decision = await self.gemini_service.evaluate_and_generate_next_turn(
             target_role=session.target_role,
             seniority_level=session.seniority_level,
@@ -481,11 +767,15 @@ class InterviewService:
             candidate_answer=turn.candidate_answer,
             transcript_history=transcript_history,
             excluded_question_ids=excluded_question_ids,
+            preferred_language=getattr(session, "preferred_language", "en") or "en",
+            parsed_jd_data=session.parsed_jd_data,
+            resume_data=resume_data,
+            candidate_context=candidate_context,
+            question_plan=next_core_plan,
         )
 
-        # 7. Rules 1, 4, 7, 8: Validate and enforce deterministic next-turn state
+        # 8. Validate and enforce deterministic next-turn state
         allow_followup = followup_eligible and bool(decision.is_follow_up)
-
         raw_q_text = (decision.question_text or "").strip()
         is_duplicate = bool(raw_q_text and _normalize_question_text(raw_q_text) in prior_normalized_questions)
 
@@ -504,12 +794,12 @@ class InterviewService:
         elif remaining_core > 0:
             # Fallback triggered by: premature completion, empty question text, or duplicate question text
             logger.warning(
-                f"Session {session.id} Turn {turn.turn_index + 1}: Overriding Gemini output (duplicate={is_duplicate}, empty={not raw_q_text}) with Question Bank fallback."
+                f"Session {session.id} Turn {turn.turn_index + 1}: Overriding Gemini output (duplicate={is_duplicate}, empty={not raw_q_text}) with grounded fallback."
             )
-            fallback_core = get_fallback_question(
-                role=session.target_role,
-                seniority=session.seniority_level,
-                focus=session.interview_focus,
+            fallback_core = get_grounded_fallback_question(
+                context=candidate_context,
+                plan=next_core_plan,
+                language=getattr(session, "preferred_language", "en") or "en",
                 stage_index=completed_core,
                 excluded_question_ids=excluded_question_ids,
             )
@@ -529,10 +819,13 @@ class InterviewService:
                 session_status=session.status,
                 is_interview_complete=True,
                 answered_turn_id=turn.id,
+                current_core_question_index=max(0, completed_core - 1),
+                total_core_questions=session.planned_core_questions,
+                interview_phase="completed",
                 next_turn=None,
             )
 
-        # 8. Create and persist the authoritative next turn
+        # 9. Create and persist the authoritative next turn
         next_turn_index = total_turns
         next_turn = InterviewQuestionTurn(
             session_id=session.id,
@@ -549,13 +842,19 @@ class InterviewService:
         await db.commit()
         await db.refresh(next_turn)
 
+        updated_turns = all_turns + [next_turn]
+        next_meta = compute_turn_metadata(session, next_turn, updated_turns)
+
         return TurnAnswerSubmissionResponse(
             session_id=session.id,
             current_turn_index=next_turn_index,
             session_status=session.status,
             is_interview_complete=False,
             answered_turn_id=turn.id,
-            next_turn=InterviewQuestionTurnResponse.model_validate(next_turn),
+            current_core_question_index=next_meta["core_question_index"],
+            total_core_questions=session.planned_core_questions,
+            interview_phase=next_meta["interview_phase"],
+            next_turn=build_turn_response(next_turn, session, updated_turns),
         )
 
     async def get_session_turns(

@@ -14,6 +14,61 @@ class EducationItem(BaseModel):
     graduation_year: Optional[str] = Field(None, description="Year or date range of graduation.")
 
 
+class ResumeProjectItem(BaseModel):
+    """Candidate project entry providing architectural and implementation context."""
+
+    title: str = Field(..., description="Project name or title.")
+    description: Optional[str] = Field(
+        None, description="Overview of the project purpose and functionality."
+    )
+    technologies: List[str] = Field(
+        default_factory=list,
+        description="Key technologies, frameworks, databases, and tools used.",
+    )
+    responsibilities: Optional[str] = Field(
+        None,
+        description="Candidate's specific contributions, role, or ownership area.",
+    )
+    architecture_details: Optional[str] = Field(
+        None,
+        description="Architectural patterns, system design, or implementation mechanics.",
+    )
+    challenges: Optional[str] = Field(
+        None,
+        description="Technical challenges, constraints, or trade-offs overcome.",
+    )
+    outcomes: Optional[str] = Field(
+        None,
+        description="Measurable outcomes, performance gains, metrics, or project impact.",
+    )
+
+
+class WorkExperienceItem(BaseModel):
+    """Professional work history record."""
+
+    company: str = Field(
+        ..., description="Company, organization, or client name."
+    )
+    role: Optional[str] = Field(
+        None, description="Job title or engineering role held."
+    )
+    duration: Optional[str] = Field(
+        None, description="Employment time period or date range (e.g. 'Jan 2022 - Present')."
+    )
+    responsibilities: List[str] = Field(
+        default_factory=list,
+        description="Core duties, technical responsibilities, and system ownership.",
+    )
+    technologies: List[str] = Field(
+        default_factory=list,
+        description="Languages, frameworks, databases, and cloud platforms utilized.",
+    )
+    achievements: List[str] = Field(
+        default_factory=list,
+        description="Key quantifiable accomplishments, delivered features, and milestones.",
+    )
+
+
 class ParsedResumeData(BaseModel):
     """Standardized AI-extracted resume profile data."""
 
@@ -38,6 +93,14 @@ class ParsedResumeData(BaseModel):
         default="",
         description="2-3 sentence executive career summary highlighting candidate focus and strengths.",
     )
+    projects: List[ResumeProjectItem] = Field(
+        default_factory=list,
+        description="Candidate engineering projects, tech stacks, and architectural details.",
+    )
+    work_history: List[WorkExperienceItem] = Field(
+        default_factory=list,
+        description="Professional employment history, roles, responsibilities, and achievements.",
+    )
 
 
 class ResumeParsedDataUpdateRequest(BaseModel):
@@ -48,6 +111,8 @@ class ResumeParsedDataUpdateRequest(BaseModel):
     domains: Optional[List[str]] = Field(None, description="Updated technical domains.")
     education: Optional[List[EducationItem]] = Field(None, description="Updated education history.")
     summary: Optional[str] = Field(None, description="Updated executive summary.")
+    projects: Optional[List[ResumeProjectItem]] = Field(None, description="Updated projects.")
+    work_history: Optional[List[WorkExperienceItem]] = Field(None, description="Updated work history.")
 
 
 class ResumeResponse(BaseModel):

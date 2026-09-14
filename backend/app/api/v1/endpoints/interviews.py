@@ -27,6 +27,7 @@ from app.services.evaluation_service import (
 from app.services.interview_presets import get_presets_catalog
 from app.services.interview_service import (
     InterviewService,
+    build_turn_response,
     get_interview_service,
 )
 
@@ -69,6 +70,7 @@ async def list_user_sessions(
             target_role=s.target_role,
             seniority_level=s.seniority_level,
             interview_focus=s.interview_focus,
+            preferred_language=getattr(s, "preferred_language", "en") or "en",
             practice_mode=s.practice_mode,
             status=s.status,
             overall_score=s.overall_score,
@@ -188,11 +190,17 @@ async def start_interview_session(
         InterviewService, Depends(get_interview_service)
     ],
 ) -> InterviewQuestionTurnResponse:
-    """Generate the initial core question (Turn 0) and start the live interview loop."""
+    """Generate the initial conversational introduction (Turn 0) and start the live interview loop."""
     turn = await interview_service.start_interview(
         db=db, current_user=current_user, session_id=session_id
     )
-    return InterviewQuestionTurnResponse.model_validate(turn)
+    session = await interview_service.get_session(
+        db=db, current_user=current_user, session_id=session_id
+    )
+    all_turns = await interview_service.get_session_turns(
+        db=db, current_user=current_user, session_id=session_id
+    )
+    return build_turn_response(turn, session, all_turns)
 
 
 @router.get(
@@ -213,7 +221,13 @@ async def get_current_turn(
     turn = await interview_service.get_current_turn(
         db=db, current_user=current_user, session_id=session_id
     )
-    return InterviewQuestionTurnResponse.model_validate(turn)
+    session = await interview_service.get_session(
+        db=db, current_user=current_user, session_id=session_id
+    )
+    all_turns = await interview_service.get_session_turns(
+        db=db, current_user=current_user, session_id=session_id
+    )
+    return build_turn_response(turn, session, all_turns)
 
 
 @router.post(
@@ -263,7 +277,10 @@ async def get_session_turns(
     turns = await interview_service.get_session_turns(
         db=db, current_user=current_user, session_id=session_id
     )
-    return [InterviewQuestionTurnResponse.model_validate(t) for t in turns]
+    session = await interview_service.get_session(
+        db=db, current_user=current_user, session_id=session_id
+    )
+    return [build_turn_response(t, session, turns) for t in turns]
 
 
 @router.post(
