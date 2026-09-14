@@ -42,6 +42,7 @@ class QuestionPlan(BaseModel):
         ..., description="Benchmark evaluated technical concept."
     )
     stage_index: int = Field(0, description="0-indexed core question sequence number.")
+    is_escalated: bool = Field(False, description="True if question difficulty was escalated for high performer.")
 
 
 class QuestionPlanner:
@@ -55,6 +56,7 @@ class QuestionPlanner:
         covered_intents: Optional[List[str]] = None,
         covered_topics: Optional[List[str]] = None,
         previous_turns: Optional[List[Dict[str, Any]]] = None,
+        average_prior_score: Optional[float] = None,
     ) -> QuestionPlan:
         """Formulate a strategic QuestionPlan for the upcoming core question turn.
         
@@ -65,6 +67,7 @@ class QuestionPlanner:
             covered_intents: List of previously executed question intents.
             covered_topics: List of previously covered topic titles/skills.
             previous_turns: History of turns for contextual awareness.
+            average_prior_score: Optional average score across prior turns.
         """
         intents_history = [str(i).lower() for i in (covered_intents or [])]
         topics_history = [str(t).lower() for t in (covered_topics or [])]
@@ -84,6 +87,8 @@ class QuestionPlanner:
             current_core_index=current_core_index,
             intents_history=intents_history,
             topics_history=topics_history,
+            previous_turns=previous_turns,
+            average_prior_score=average_prior_score,
         )
 
     def _plan_quick_mode(
@@ -124,6 +129,8 @@ class QuestionPlanner:
         current_core_index: int,
         intents_history: List[str],
         topics_history: List[str],
+        previous_turns: Optional[List[Dict[str, Any]]] = None,
+        average_prior_score: Optional[float] = None,
     ) -> QuestionPlan:
         """Formulate plan for 6-turn Full practice mode."""
         # Core Q1 (Index 0): Resume Project or Work Experience Opening
@@ -160,12 +167,21 @@ class QuestionPlanner:
                 return plan
             return self._plan_core_skill_or_scenario(context, topics_history, stage_index=3)
 
-        # Core Q5 (Index 4): High Concurrency / Distributed Failure Scenario
+        # Check if candidate has demonstrated strong mastery on prior turns
+        is_strong_trajectory = False
+        if average_prior_score is not None and average_prior_score >= 80.0:
+            is_strong_trajectory = True
+        elif previous_turns and len(previous_turns) >= 2:
+            evaluated_scores = [t.get("turn_score") for t in previous_turns if t.get("turn_score") is not None]
+            if evaluated_scores and (sum(evaluated_scores) / len(evaluated_scores)) >= 80.0:
+                is_strong_trajectory = True
+
+        # Core Q5 (Index 4): High Concurrency / Distributed Failure Scenario (escalated if strong)
         if current_core_index == 4:
-            return self._plan_scenario(context, topics_history, stage_index=4)
+            return self._plan_scenario(context, topics_history, stage_index=4, is_escalated=is_strong_trajectory)
 
         # Core Q6 (Index 5): Comprehensive System Design / Architectural Trade-offs
-        return self._plan_advanced_architecture(context, topics_history, stage_index=5)
+        return self._plan_advanced_architecture(context, topics_history, stage_index=5, is_escalated=is_strong_trajectory)
 
     def _try_plan_project(
         self, context: CandidateContext, topics_history: List[str], stage_index: int
@@ -310,7 +326,11 @@ class QuestionPlanner:
         return self._plan_scenario(context, topics_history, stage_index=stage_index)
 
     def _plan_scenario(
-        self, context: CandidateContext, topics_history: List[str], stage_index: int
+        self,
+        context: CandidateContext,
+        topics_history: List[str],
+        stage_index: int,
+        is_escalated: bool = False,
     ) -> QuestionPlan:
         """Plan a realistic practical problem-solving or system design scenario."""
         from app.services.question_bank import get_competency_stages
@@ -323,38 +343,62 @@ class QuestionPlanner:
         stage_title = target_stage.competency_title if target_stage else "System Architecture"
 
         snippet = f"Practical architectural scenario for {level} {role} ({stage_title})."
-        guidance = (
-            f"Present a realistic production scenario for a {level} {role} focusing on {stage_title.lower()}. "
-            f"Ask the candidate to walk through their architectural mitigation strategy and trade-offs."
-        )
+        if is_escalated:
+            guidance = (
+                f"Candidate has demonstrated strong technical mastery. Present an advanced, high-stakes production failure scenario for a {level} {role} focusing on {stage_title.lower()}. "
+                f"Probe how they would diagnose catastrophic failure, mitigate cascading outages, and maintain data consistency under degraded conditions."
+            )
+            primary_concept = f"Advanced Resilient Architecture: {stage_title}"
+        else:
+            guidance = (
+                f"Present a realistic production scenario for a {level} {role} focusing on {stage_title.lower()}. "
+                f"Ask the candidate to walk through their architectural mitigation strategy and trade-offs."
+            )
+            primary_concept = stage_concept
+
         return QuestionPlan(
             intent=QuestionIntent.PRACTICAL_SCENARIO,
             topic=f"{role} {stage_title} Scenario",
             grounding_snippet=snippet,
             guidance=guidance,
-            primary_concept=stage_concept,
+            primary_concept=primary_concept,
             stage_index=stage_index,
+            is_escalated=is_escalated,
         )
 
     def _plan_advanced_architecture(
-        self, context: CandidateContext, topics_history: List[str], stage_index: int
+        self,
+        context: CandidateContext,
+        topics_history: List[str],
+        stage_index: int,
+        is_escalated: bool = False,
     ) -> QuestionPlan:
         """Plan an advanced system design or end-to-end integration question."""
         role = context.target_role
         level = context.seniority_level
         snippet = f"Advanced system design and trade-offs for {level} {role}."
-        guidance = (
-            f"Ask a comprehensive system design question tailored to {level} {role}. "
-            f"Ask how they would design an end-to-end distributed system, ensure data consistency across microservices, "
-            f"and evaluate the trade-offs between latency, consistency, and operational complexity."
-        )
+        if is_escalated:
+            guidance = (
+                f"Candidate has demonstrated deep domain mastery. Ask an advanced end-to-end distributed system design question tailored to a {level} {role}. "
+                f"Challenge them on CAP theorem compromises, multi-region replication lag, event-driven ordering guarantees, and cost vs latency trade-offs."
+            )
+            primary_concept = "Advanced Distributed Systems & Multi-Region Trade-offs"
+        else:
+            guidance = (
+                f"Ask a comprehensive system design question tailored to {level} {role}. "
+                f"Ask how they would design an end-to-end distributed system, ensure data consistency across microservices, "
+                f"and evaluate the trade-offs between latency, consistency, and operational complexity."
+            )
+            primary_concept = "End-to-End System Design & Trade-offs"
+
         return QuestionPlan(
             intent=QuestionIntent.PRACTICAL_SCENARIO,
             topic=f"{role} Distributed Architecture Design",
             grounding_snippet=snippet,
             guidance=guidance,
-            primary_concept="End-to-End System Design & Trade-offs",
+            primary_concept=primary_concept,
             stage_index=stage_index,
+            is_escalated=is_escalated,
         )
 
 
