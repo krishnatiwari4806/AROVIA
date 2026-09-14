@@ -12,14 +12,23 @@ from pydantic import BaseModel, Field, ValidationError as PydanticValidationErro
 from app.core.config import settings
 from app.core.exceptions import AppError
 from app.schemas.evaluation import (
+    AnswerQualityTier,
+    CompletenessLevel,
+    ConceptImportance,
+    EvidenceCategory,
+    ExpectedConcept,
     ImprovementItem,
+    QuestionReferencePayload,
+    SemanticEvaluationResult,
     SessionEvaluationReport,
     StrengthItem,
     TurnEvaluationItem,
 )
 from app.schemas.interview import GeneratedQuestion, NextTurnDecision
 from app.schemas.resume import ParsedResumeData
+from app.services.answer_classifier import is_non_answer
 from app.services.candidate_context import CandidateContext, build_candidate_context
+from app.services.conversational_bridge import get_conversational_bridge_engine
 from app.services.question_bank import (
     get_competency_stages,
     get_fallback_followup,
@@ -31,6 +40,9 @@ from app.services.question_planner import (
     QuestionPlanner,
     get_question_planner,
 )
+from app.services.reference_evaluator import get_reference_evaluator_service
+from app.services.score_calibrator import get_score_calibrator
+from app.services.semantic_evaluator import get_semantic_evaluator_engine
 
 logger = logging.getLogger(__name__)
 
@@ -266,6 +278,40 @@ def get_grounded_fallback_question(
     )
 
 
+def get_semantic_gap_fallback_followup(
+    role: str,
+    seniority: str = "mid",
+    parent_concept: str = "Technical Architecture",
+    target_missing_concept: str = "System Trade-offs",
+    language: str = "en",
+) -> GeneratedQuestion:
+    """Generate deterministic, grounded follow-up targeting the specific missing concept in preferred language."""
+    lang = (language or "en").lower().strip()
+    clean_missing = (target_missing_concept or "underlying trade-offs").strip()
+
+    if lang == "hi":
+        q_text = (
+            f"Aapne jo explain kiya uske aage, is architecture mein aap '{clean_missing}' ke implementation "
+            f"aur trade-offs ko kaise handle karenge?"
+        )
+    elif lang == "hinglish":
+        q_text = (
+            f"Building on what you just explained, is architecture mein aap '{clean_missing}' ke implementation "
+            f"aur trade-offs ko kaise approach karenge?"
+        )
+    else:
+        q_text = (
+            f"Building on what you just shared, could you explain how you would approach '{clean_missing}' "
+            f"and its operational trade-offs in that architecture?"
+        )
+
+    return GeneratedQuestion(
+        question_text=q_text,
+        ideal_answer=f"Detailed technical explanation of {clean_missing} principles, implementation mechanics, and operational trade-offs in {role} systems.",
+        primary_concept=clean_missing,
+    )
+
+
 INITIAL_QUESTION_PROMPT_TEMPLATE = """You are an expert technical interviewer for the AROVIA mock interview platform.
 Generate the first core technical interview question (Core Question 1, following the Turn 0 conversational introduction).
 
@@ -315,6 +361,13 @@ Evaluate the candidate's latest response and determine the next interview turn (
 - Planned Next Core Topic: {planned_next_topic}
 - Planned Next Core Grounding: {planned_next_grounding}
 
+### SEMANTIC EVIDENCE OF LATEST ANSWER
+- Answer Quality Tier: {evaluated_tier}
+- Completeness Level: {evaluated_completeness}
+- Covered Concepts: {covered_concepts_str}
+- Missing Concepts (Priority): {missing_concepts_str}
+- Target Missing Concept: {target_missing_concept}
+
 ### PREVIOUS CONVERSATION
 Recent Turns Transcript:
 {transcript_history}
@@ -325,25 +378,26 @@ Latest Question Asked:
 Candidate Latest Answer:
 "{candidate_answer}"
 
-### STRATEGIC GUIDANCE FOR NEXT CORE QUESTION
+### STRATEGIC GUIDANCE FOR NEXT QUESTION
 {planner_guidance}
 
 ### LANGUAGE GUIDELINES
 {language_instructions}
 
 ### ADAPTIVE DECISION & ANTI-HALLUCINATION RULES
-1. NON-ANSWER / PASS RULE: If the candidate explicitly says "I don't know", "no idea", "pass", "skip", or indicates they do not know the topic, DO NOT generate a follow-up probe pretending they answered. Set `is_follow_up=False` and advance to the next planned core question!
-2. THOROUGH ANSWER RULE: If the candidate provided a comprehensive, technically thorough response with clear explanations, DO NOT ask repetitive follow-up probes. Set `is_follow_up=False` and advance to the next planned core question ({planned_next_topic}).
-3. SHALLOW / VAGUE ANSWER RULE: If `followup_allowed` is True, `remaining_followup_budget` > 0, and the candidate gave a shallow or incomplete answer with unbacked claims or missing trade-offs:
+1. NON-ANSWER / PASS / IRRELEVANT RULE: If candidate said "I don't know", "no idea", "pass", "skip", or gave an off-topic/empty answer (tier: {evaluated_tier}), DO NOT generate a follow-up probe. Set `is_follow_up=False` and advance to the next planned core question!
+2. COMPLETE / STRONG ANSWER RULE: If candidate covered all core concepts thoroughly ({evaluated_completeness} / {evaluated_tier}), DO NOT ask redundant follow-up probes. Set `is_follow_up=False` and advance to the next planned core question ({planned_next_topic}).
+3. SEMANTIC-GAP PROBE RULE: If `followup_allowed` is True and the candidate gave a partial/incomplete answer missing key concepts:
    - Set `is_follow_up=True`.
-   - Provide `follow_up_reasoning` explaining what gap or trade-off needs probing.
-   - Formulate a targeted, conversational follow-up in `question_text` probing the specific mechanism or trade-off they mentioned.
+   - Provide `follow_up_reasoning` explaining that '{target_missing_concept}' was omitted.
+   - Formulate a targeted, conversational follow-up in `question_text` specifically probing '{target_missing_concept}'. Do NOT ask about concepts already covered ({covered_concepts_str}).
 4. ADVANCING TO NEXT CORE QUESTION: If `is_follow_up=False` and `remaining_core_questions` > 0:
    - Generate the next core question based on the Planned Next Core Intent ({planned_next_intent}) and Topic ({planned_next_topic}).
    - Ground the question strictly in the provided Candidate Context or Job Description without hallucinating facts.
-5. INTERVIEW COMPLETION: If `remaining_core_questions` <= 0 and no follow-up is warranted:
+5. CONVERSATIONAL TRANSITION: Include a brief, natural conversational transition phrase connecting the previous discussion to the next inquiry without repeating candidate words word-for-word.
+6. INTERVIEW COMPLETION: If `remaining_core_questions` <= 0 and no follow-up is warranted:
    - Set `is_interview_complete=True`, `is_follow_up=False`, and leave question_text null.
-6. AVOID DUPLICATION: Never repeat questions or topics already discussed in previous turns.
+7. AVOID DUPLICATION: Never repeat questions or topics already discussed in previous turns.
 """
 
 SESSION_EVALUATION_PROMPT_TEMPLATE = """You are the Chief Technical Interview Evaluator for the AROVIA platform.
@@ -798,8 +852,10 @@ class GeminiService:
         resume_data: Optional[Dict[str, Any]] = None,
         candidate_context: Optional[CandidateContext] = None,
         question_plan: Optional[QuestionPlan] = None,
+        semantic_result: Optional[SemanticEvaluationResult] = None,
+        reference_payload: Optional[QuestionReferencePayload] = None,
     ) -> NextTurnDecision:
-        """Evaluate candidate answer and decide whether to probe deeper or advance using Candidate Context and Planner."""
+        """Evaluate candidate answer and decide whether to probe deeper or advance using Semantic Evidence, Context, and Planner."""
         # 1. Build context if not provided
         if candidate_context is None:
             intro_ans = None
@@ -840,14 +896,103 @@ class GeminiService:
                 previous_turns=transcript_history,
             )
 
-        # 3. Check for Non-Answer ("I don't know", pass, skip, etc.)
-        candidate_said_dont_know = is_non_answer(candidate_answer)
+        # 3. Resolve reference payload and evaluate turn semantics if not supplied
+        if reference_payload is None:
+            ref_service = get_reference_evaluator_service()
+            # Construct a lightweight mock turn to resolve reference payload
+            from app.models.interview import InterviewQuestionTurn
+            mock_turn = InterviewQuestionTurn(
+                turn_index=current_turn_index,
+                question_text=previous_question,
+                candidate_answer=candidate_answer,
+                question_type="core",
+                is_follow_up=prior_turn_was_followup,
+            )
+            reference_payload = ref_service.resolve_reference_for_turn(
+                turn=mock_turn,
+                parsed_jd_data=parsed_jd_data,
+                resume_data=resume_data,
+                focus_skills=focus_skills,
+                target_role=target_role,
+                seniority_level=seniority_level,
+            )
 
-        # Follow-up is strictly forbidden if candidate explicitly admitted not knowing, or if budget <= 0, or prior was followup
+        if semantic_result is None:
+            sem_engine = get_semantic_evaluator_engine()
+            semantic_result = sem_engine.evaluate_turn_semantics(
+                candidate_answer=candidate_answer,
+                reference_payload=reference_payload,
+                question_text=previous_question,
+                interview_focus=interview_focus,
+            )
+
+        # 4. Extract Semantic Evidence
+        evaluated_tier = (
+            semantic_result.assigned_tier.value
+            if hasattr(semantic_result.assigned_tier, "value")
+            else str(semantic_result.assigned_tier)
+        )
+        evaluated_completeness = (
+            semantic_result.completeness.value
+            if hasattr(semantic_result.completeness, "value")
+            else str(semantic_result.completeness)
+        )
+        covered_concepts_str = (
+            ", ".join(semantic_result.covered_concepts)
+            if semantic_result.covered_concepts
+            else "None"
+        )
+        missing_concepts_str = (
+            ", ".join(semantic_result.missed_concepts)
+            if semantic_result.missed_concepts
+            else "None"
+        )
+
+        # Prioritize CORE missing concepts over SUPPORTING missing concepts
+        target_missing_concept = "None (All key concepts demonstrated)"
+        if semantic_result.missed_concepts:
+            # Check if any missing concept has CORE importance
+            core_missing = []
+            for missed in semantic_result.missed_concepts:
+                missed_norm = missed.lower().strip()
+                for exp in reference_payload.expected_concepts:
+                    exp_name = getattr(exp, "concept", getattr(exp, "concept_name", ""))
+                    if exp.importance == ConceptImportance.CORE:
+                        if exp_name.lower().strip() in missed_norm or missed_norm in exp_name.lower().strip():
+                            core_missing.append(exp_name)
+                            break
+            if core_missing:
+                target_missing_concept = core_missing[0]
+            else:
+                target_missing_concept = semantic_result.missed_concepts[0]
+
+        # 5. Semantic Follow-up Rules
+        # Non-answers (I don't know, pass, skip, empty, irrelevant) MUST NOT receive follow-up probes
+        candidate_said_dont_know = (
+            semantic_result.assigned_tier in (
+                AnswerQualityTier.NON_ANSWER,
+                AnswerQualityTier.EMPTY,
+                AnswerQualityTier.PASS,
+                AnswerQualityTier.IRRELEVANT,
+            )
+            or is_non_answer(candidate_answer)
+        )
+
         followup_allowed = (
             not prior_turn_was_followup
             and remaining_followup_budget > 0
             and not candidate_said_dont_know
+        )
+
+        # Semantic gap follow-up is warranted if partial/insufficient and key concepts were missed
+        followup_warranted = (
+            followup_allowed
+            and semantic_result.completeness in (
+                CompletenessLevel.PARTIAL,
+                CompletenessLevel.INSUFFICIENT,
+            )
+            and bool(semantic_result.missed_concepts)
+            and target_missing_concept != "None (All key concepts demonstrated)"
         )
 
         # If all core questions are completed and no follow-up is allowed, complete session
@@ -885,6 +1030,11 @@ class GeminiService:
             planned_next_intent=planned_intent_str,
             planned_next_topic=planned_topic_str,
             planned_next_grounding=planned_grounding_str,
+            evaluated_tier=evaluated_tier,
+            evaluated_completeness=evaluated_completeness,
+            covered_concepts_str=covered_concepts_str,
+            missing_concepts_str=missing_concepts_str,
+            target_missing_concept=target_missing_concept,
             transcript_history=history_str,
             previous_question=previous_question,
             candidate_answer=candidate_answer,
@@ -910,9 +1060,17 @@ class GeminiService:
                 )
                 if response.text:
                     parsed = NextTurnDecision.model_validate_json(response.text)
-                    # Enforce non-answer rule if LLM erroneously tried to generate a follow-up
+                    # Enforce strict non-answer & budget guardrails on LLM output
                     if candidate_said_dont_know and parsed.is_follow_up:
                         logger.info("Candidate gave a non-answer; overriding LLM follow-up decision to advance.")
+                        parsed.is_follow_up = False
+
+                    if not followup_allowed and parsed.is_follow_up:
+                        logger.info("Follow-up not allowed by budget/prior turn; overriding LLM follow-up decision.")
+                        parsed.is_follow_up = False
+
+                    if parsed.is_follow_up and semantic_result.completeness == CompletenessLevel.COMPLETE:
+                        logger.info("Candidate answer is complete; overriding LLM follow-up decision to advance.")
                         parsed.is_follow_up = False
 
                     if parsed.is_interview_complete:
@@ -937,34 +1095,34 @@ class GeminiService:
             f"Adaptive next turn generation failed: {last_exception}. Using grounded fallback decision."
         )
 
-        # 1. If all core questions are completed, end session cleanly
-        if remaining_core_questions <= 0:
+        # 1. If all core questions are completed and no follow-up is warranted, end session cleanly
+        if remaining_core_questions <= 0 and not (followup_allowed and followup_warranted):
             return NextTurnDecision(
                 is_follow_up=False,
                 is_interview_complete=True,
                 follow_up_reasoning="All core questions completed.",
             )
 
-        # 2. If follow-up is eligible, candidate did NOT say "I don't know", and answer was brief/shallow (< 10 words)
-        ans_words = len((candidate_answer or "").strip().split())
+        # 2. If follow-up is warranted based on semantic gap (NOT word count!)
         if (
             followup_allowed
-            and not candidate_said_dont_know
-            and ans_words < 10
+            and followup_warranted
+            and target_missing_concept != "None (All key concepts demonstrated)"
         ):
-            followup_tpl = get_fallback_followup(
+            followup_probe = get_semantic_gap_fallback_followup(
                 role=target_role,
                 seniority=seniority_level,
-                focus=interview_focus,
                 parent_concept=previous_question,
+                target_missing_concept=target_missing_concept,
+                language=preferred_language or "en",
             )
             return NextTurnDecision(
                 is_follow_up=True,
                 is_interview_complete=False,
-                follow_up_reasoning="Candidate provided a concise response; probing deeper into underlying mechanics.",
-                question_text=followup_tpl.prompt,
-                ideal_answer=followup_tpl.ideal_focus,
-                primary_concept=followup_tpl.target_probe,
+                follow_up_reasoning=f"Candidate omitted '{target_missing_concept}'; probing missing domain concept directly.",
+                question_text=followup_probe.question_text,
+                ideal_answer=followup_probe.ideal_answer,
+                primary_concept=followup_probe.primary_concept,
             )
 
         # 3. Otherwise, advance to the next progressive grounded core question
