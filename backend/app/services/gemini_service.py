@@ -1078,7 +1078,21 @@ class GeminiService:
                             logger.warning(
                                 f"Gemini returned premature completion with {remaining_core_questions} core questions remaining. Overriding with grounded fallback."
                             )
-                            break
+                            fallback_core = get_grounded_fallback_question(
+                                context=candidate_context,
+                                plan=question_plan,
+                                language=preferred_language or "en",
+                                stage_index=completed_core_turns,
+                                excluded_question_ids=excluded_question_ids,
+                            )
+                            return NextTurnDecision(
+                                is_follow_up=False,
+                                follow_up_reasoning=f"Overriding premature completion with {remaining_core_questions} core questions remaining.",
+                                question_text=fallback_core.question_text,
+                                ideal_answer=fallback_core.ideal_answer,
+                                primary_concept=fallback_core.primary_concept,
+                                is_interview_complete=False,
+                            )
                         return parsed
                     elif parsed.question_text and parsed.question_text.strip():
                         return parsed

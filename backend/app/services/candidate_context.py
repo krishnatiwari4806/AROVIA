@@ -82,6 +82,214 @@ TECH_ALIASES: Dict[str, str] = {
     "sklearn": "scikit-learn",
     "pytorch": "pytorch",
     "tensorflow": "tensorflow",
+    "grpc": "grpc",
+    "gRPC": "grpc",
+    "power bi": "power bi",
+    "powerbi": "power bi",
+    "tableau": "tableau",
+    "spark": "spark",
+    "apache spark": "spark",
+    "airflow": "airflow",
+    "apache airflow": "airflow",
+    "spring boot": "spring boot",
+    "springboot": "spring boot",
+    "spring": "spring",
+    "microservices": "microservices",
+    "microservice": "microservices",
+    "distributed systems": "distributed systems",
+    "distributed system": "distributed systems",
+    "terraform": "terraform",
+    "linux": "linux",
+    "bash": "bash",
+    "shell": "bash",
+    "rust": "rust",
+    "ruby": "ruby",
+    "php": "php",
+    "swift": "swift",
+    "kotlin": "kotlin",
+    "scala": "scala",
+    "dart": "dart",
+    "cassandra": "cassandra",
+    "dynamodb": "dynamodb",
+    "elasticsearch": "elasticsearch",
+    "snowflake": "snowflake",
+    "bigquery": "bigquery",
+}
+
+# Canonical Display Names for Identified Technologies & Architecture Concepts
+KNOWN_TECH_SIGNALS: Dict[str, str] = {
+    # Programming Languages
+    "python": "Python",
+    "python3": "Python",
+    "javascript": "JavaScript",
+    "typescript": "TypeScript",
+    "golang": "Go",
+    "java": "Java",
+    "c++": "C++",
+    "cpp": "C++",
+    "c#": "C#",
+    "csharp": "C#",
+    "rust": "Rust",
+    "ruby": "Ruby",
+    "php": "PHP",
+    "swift": "Swift",
+    "kotlin": "Kotlin",
+    "sql": "SQL",
+    "scala": "Scala",
+    "dart": "Dart",
+    "html": "HTML",
+    "css": "CSS",
+    "bash": "Bash",
+    "shell": "Bash",
+    # Frameworks & Libraries
+    "react": "React",
+    "reactjs": "React",
+    "react native": "React Native",
+    "angular": "Angular",
+    "angularjs": "Angular",
+    "vue": "Vue",
+    "vuejs": "Vue",
+    "nextjs": "Next.js",
+    "next.js": "Next.js",
+    "nodejs": "Node.js",
+    "node.js": "Node.js",
+    "express": "Express.js",
+    "expressjs": "Express.js",
+    "fastapi": "FastAPI",
+    "django": "Django",
+    "flask": "Flask",
+    "spring": "Spring",
+    "spring boot": "Spring Boot",
+    "springboot": "Spring Boot",
+    "asp.net": "ASP.NET",
+    "dotnet": ".NET",
+    ".net": ".NET",
+    "flutter": "Flutter",
+    "pytorch": "PyTorch",
+    "tensorflow": "TensorFlow",
+    "pandas": "Pandas",
+    "numpy": "NumPy",
+    "scikit-learn": "scikit-learn",
+    "sklearn": "scikit-learn",
+    "graphql": "GraphQL",
+    "grpc": "gRPC",
+    "tailwind": "Tailwind CSS",
+    "tailwindcss": "Tailwind CSS",
+    # Databases & Caches
+    "postgresql": "PostgreSQL",
+    "postgres": "PostgreSQL",
+    "psql": "PostgreSQL",
+    "mysql": "MySQL",
+    "mongodb": "MongoDB",
+    "mongo": "MongoDB",
+    "redis": "Redis",
+    "cassandra": "Cassandra",
+    "dynamodb": "DynamoDB",
+    "elasticsearch": "Elasticsearch",
+    "elastic": "Elasticsearch",
+    "sqlite": "SQLite",
+    "snowflake": "Snowflake",
+    "bigquery": "BigQuery",
+    "neo4j": "Neo4j",
+    "oracle": "Oracle",
+    "mariadb": "MariaDB",
+    "supabase": "Supabase",
+    "firebase": "Firebase",
+    # Message Streaming, DevOps & Cloud
+    "kafka": "Kafka",
+    "apache kafka": "Kafka",
+    "rabbitmq": "RabbitMQ",
+    "aws": "AWS",
+    "amazon web services": "AWS",
+    "gcp": "GCP",
+    "google cloud": "GCP",
+    "azure": "Azure",
+    "docker": "Docker",
+    "kubernetes": "Kubernetes",
+    "k8s": "Kubernetes",
+    "terraform": "Terraform",
+    "ci/cd": "CI/CD",
+    "cicd": "CI/CD",
+    "git": "Git",
+    "github": "GitHub",
+    "gitlab": "GitLab",
+    "jenkins": "Jenkins",
+    "linux": "Linux",
+    # Analytics & Big Data
+    "power bi": "Power BI",
+    "powerbi": "Power BI",
+    "tableau": "Tableau",
+    "spark": "Apache Spark",
+    "apache spark": "Apache Spark",
+    "airflow": "Apache Airflow",
+    "apache airflow": "Apache Airflow",
+    "databricks": "Databricks",
+    "hadoop": "Hadoop",
+    "postman": "Postman",
+    # Architecture & Domain Specialties
+    "microservices": "Microservices",
+    "microservice": "Microservices",
+    "distributed systems": "Distributed Systems",
+    "distributed system": "Distributed Systems",
+    "rest apis": "REST APIs",
+    "rest api": "REST APIs",
+    "restful": "REST APIs",
+    "event driven architecture": "Event-Driven Architecture",
+    "event-driven architecture": "Event-Driven Architecture",
+    "event driven": "Event-Driven Architecture",
+    "system design": "System Design",
+    "machine learning": "Machine Learning",
+    "data engineering": "Data Engineering",
+    "cloud architecture": "Cloud Architecture",
+    "backend": "Backend Systems",
+    "frontend": "Frontend Development",
+    "full stack": "Full Stack",
+    "fullstack": "Full Stack",
+    "devops": "DevOps",
+}
+
+# Domain classifications mapped from keyword triggers
+DOMAIN_KEYWORDS: Dict[str, str] = {
+    "distributed systems": "Distributed Systems",
+    "distributed system": "Distributed Systems",
+    "microservices": "Microservices",
+    "microservice": "Microservices",
+    "machine learning": "Machine Learning",
+    "data engineering": "Data Engineering",
+    "cloud architecture": "Cloud Architecture",
+    "system design": "System Design",
+    "backend": "Backend Systems",
+    "frontend": "Frontend Development",
+    "full stack": "Full Stack",
+    "fullstack": "Full Stack",
+    "devops": "DevOps",
+}
+
+# Adversarial prompt-injection detection pattern
+PROMPT_INJECTION_PATTERN = re.compile(
+    r"(?i)\b(ignore\s+(?:all\s+|previous\s+|prior\s+)?(?:instructions?|prompts?|rules?)|"
+    r"system\s+prompt|you\s+are\s+now|pretend\s+you\s+are|act\s+as\s+a|"
+    r"disregard\s+(?:all\s+|previous\s+|prior\s+)|"
+    r"say\s+(?:i|that\s+i)\s+(?:know|have|am|mastered))\b"
+)
+
+# Number-word conversion for experience statements (English & Hindi/Hinglish)
+WORD_TO_NUMBER: Dict[str, float] = {
+    "one": 1.0,
+    "two": 2.0,
+    "three": 3.0,
+    "four": 4.0,
+    "five": 5.0,
+    "six": 6.0,
+    "seven": 7.0,
+    "eight": 8.0,
+    "nine": 9.0,
+    "ten": 10.0,
+    "ek": 1.0,
+    "do": 2.0,
+    "teen": 3.0,
+    "char": 4.0,
+    "paanch": 5.0,
 }
 
 
@@ -99,6 +307,159 @@ def normalize_skill(skill_name: Optional[str]) -> str:
     # Clean non-alphanumeric except +, #, /
     cleaned = re.sub(r"[^\w\+#/ ]", "", raw).strip()
     return TECH_ALIASES.get(cleaned, cleaned)
+
+
+def extract_candidate_signals_from_intro(
+    text: Optional[str],
+    max_skills: int = 8,
+    max_domains: int = 3,
+) -> Dict[str, Any]:
+    """Extract explicit candidate-provided skills, technologies, domains, and experience years from Turn 0 intro.
+    
+    Deterministic, conservative, and resistant to prompt injection and hallucination.
+    Supports English, Hindi, and Hinglish.
+    """
+    if not text or not text.strip():
+        return {"skills": [], "domains": [], "experience_years": None}
+
+    raw = text.strip()
+
+    # 1. Security Check: Reject prompt injection or adversarial command overrides
+    if PROMPT_INJECTION_PATTERN.search(raw):
+        logger.warning("Prompt injection pattern detected in Turn 0 introduction. Bypassing dynamic signal extraction.")
+        return {"skills": [], "domains": [], "experience_years": None}
+
+    norm_text = f" {raw.lower()} "
+
+    extracted_skills: List[str] = []
+    extracted_domains: List[str] = []
+    extracted_experience_years: Optional[float] = None
+    seen_norm_skills: Set[str] = set()
+
+    # 2. Extract Explicit Experience Duration (English / Hindi / Hinglish)
+    exp_digit_match = re.search(
+        r"(?i)\b(?:with\s+|having\s+|i\s+have\s+|mujhe\s+|maine\s+)?(\d+(?:\.\d+)?)\s*(?:\+)?\s*(?:years?|yrs?|saal|sal)(?:\s+of|\s+ka)?\s+(?:experience|anubhav|exp|working|backend|frontend|software|engineering)\b",
+        raw,
+    )
+    if not exp_digit_match:
+        # Check Hindi/Hinglish clause structure: "Maine 3 saal Python ... pe kaam kiya"
+        exp_digit_match = re.search(
+            r"(?i)\b(?:maine|mujhe)?\s*(\d+(?:\.\d+)?)\s*(?:\+)?\s*(?:saal|sal|years?|yrs?)\b.*?(?:pe\s+kaam\s+kiya|kaam\s+kiya|ka\s+experience|experience\s+hai|worked)",
+            raw,
+        )
+
+    if exp_digit_match:
+        try:
+            extracted_experience_years = float(exp_digit_match.group(1))
+        except ValueError:
+            pass
+
+    if extracted_experience_years is None:
+        exp_word_match = re.search(
+            r"(?i)\b(?:with\s+|having\s+|i\s+have\s+|mujhe\s+|maine\s+)?(one|two|three|four|five|six|seven|eight|nine|ten|ek|do|teen|char|paanch)\s*(?:\+)?\s*(?:years?|yrs?|saal|sal)(?:\s+of|\s+ka)?\s+(?:experience|anubhav|exp|working|backend|frontend|software|engineering)\b",
+            raw,
+        )
+        if not exp_word_match:
+            exp_word_match = re.search(
+                r"(?i)\b(?:maine|mujhe)?\s*(one|two|three|four|five|six|seven|eight|nine|ten|ek|do|teen|char|paanch)\s*(?:\+)?\s*(?:saal|sal|years?|yrs?)\b.*?(?:pe\s+kaam\s+kiya|kaam\s+kiya|ka\s+experience|experience\s+hai|worked)",
+                raw,
+            )
+        if exp_word_match:
+            word_key = exp_word_match.group(1).lower()
+            if word_key in WORD_TO_NUMBER:
+                extracted_experience_years = WORD_TO_NUMBER[word_key]
+
+    if extracted_experience_years is None:
+        exp_reverse_match = re.search(
+            r"(?i)\b(?:experience|anubhav|exp)\s+(?:of\s+|ka\s+)?(\d+(?:\.\d+)?)\s*(?:\+)?\s*(?:years?|yrs?|saal|sal)\b",
+            raw,
+        )
+        if exp_reverse_match:
+            try:
+                extracted_experience_years = float(exp_reverse_match.group(1))
+            except ValueError:
+                pass
+
+    # 3. Multi-word and Compound Technology / Concept Matching (Priority Order)
+    multi_word_technologies = [k for k in KNOWN_TECH_SIGNALS.keys() if " " in k or "." in k or "-" in k]
+    # Sort longest phrase first to ensure specific matches precede substrings
+    multi_word_technologies.sort(key=len, reverse=True)
+
+    for phrase in multi_word_technologies:
+        if len(extracted_skills) >= max_skills:
+            break
+        # Match with word boundaries
+        pattern = r"(?i)\b" + re.escape(phrase) + r"\b"
+        if re.search(pattern, raw):
+            canonical_name = KNOWN_TECH_SIGNALS[phrase]
+            norm_k = normalize_skill(canonical_name)
+            if norm_k not in seen_norm_skills:
+                extracted_skills.append(canonical_name)
+                seen_norm_skills.add(norm_k)
+
+            # Check if phrase maps to domain
+            if phrase in DOMAIN_KEYWORDS:
+                dom = DOMAIN_KEYWORDS[phrase]
+                if dom not in extracted_domains and len(extracted_domains) < max_domains:
+                    extracted_domains.append(dom)
+
+    # 4. Context-Aware Extraction for Ambiguous Short Tokens (e.g., 'Go', 'Spring', 'R', 'C')
+    # Go / Golang
+    if "golang" not in seen_norm_skills and "go" not in seen_norm_skills and len(extracted_skills) < max_skills:
+        if re.search(r"(?i)\bgolang\b", raw) or re.search(
+            r"(?i)\b(?:with|using|in|on|and|use|built\s+with|experience\s+with|pe\s+kaam)\s+go\b|\bgo\s+(?:microservices?|developer|programming|backend|services?|code|concurrency|and|with|,|/)\b",
+            raw,
+        ):
+            extracted_skills.append("Go")
+            seen_norm_skills.add("golang")
+            seen_norm_skills.add("go")
+
+    # Spring Framework (distinguish from seasonal 'spring')
+    if "spring" not in seen_norm_skills and "spring boot" not in seen_norm_skills and len(extracted_skills) < max_skills:
+        if re.search(r"(?i)\bspring\s+(?:framework|boot|mvc|cloud|backend|java)\b|\b(?:using|with|in)\s+spring\b", raw):
+            extracted_skills.append("Spring")
+            seen_norm_skills.add("spring")
+
+    # C++
+    if "c++" not in seen_norm_skills and len(extracted_skills) < max_skills:
+        if re.search(r"(?i)\b(c\+\+|cpp)\b", raw):
+            extracted_skills.append("C++")
+            seen_norm_skills.add("c++")
+
+    # C#
+    if "c#" not in seen_norm_skills and len(extracted_skills) < max_skills:
+        if re.search(r"(?i)\b(c#|csharp)\b", raw):
+            extracted_skills.append("C#")
+            seen_norm_skills.add("c#")
+
+    # 5. Standard Single-Word Technology Tokens
+    single_word_technologies = [
+        k for k in KNOWN_TECH_SIGNALS.keys()
+        if " " not in k and "." not in k and "-" not in k and k not in ("go", "spring", "c++", "c#", "cpp", "csharp")
+    ]
+    single_word_technologies.sort(key=len, reverse=True)
+
+    for word in single_word_technologies:
+        if len(extracted_skills) >= max_skills:
+            break
+        pattern = r"(?i)\b" + re.escape(word) + r"\b"
+        if re.search(pattern, raw):
+            canonical_name = KNOWN_TECH_SIGNALS[word]
+            norm_k = normalize_skill(canonical_name)
+            if norm_k not in seen_norm_skills:
+                extracted_skills.append(canonical_name)
+                seen_norm_skills.add(norm_k)
+
+            if word in DOMAIN_KEYWORDS:
+                dom = DOMAIN_KEYWORDS[word]
+                if dom not in extracted_domains and len(extracted_domains) < max_domains:
+                    extracted_domains.append(dom)
+
+    return {
+        "skills": extracted_skills[:max_skills],
+        "domains": extracted_domains[:max_domains],
+        "experience_years": extracted_experience_years,
+    }
 
 
 def compute_matched_and_missing_skills(
@@ -170,7 +531,7 @@ class CandidateWorkContext(BaseModel):
 
 
 class CandidateContext(BaseModel):
-    """Complete, verified candidate and interview configuration context."""
+    """Complete, verified candidate and interview configuration context with provenance tracking."""
 
     target_role: str
     seniority_level: str
@@ -187,8 +548,12 @@ class CandidateContext(BaseModel):
     projects: List[CandidateProjectContext] = Field(default_factory=list)
     work_history: List[CandidateWorkContext] = Field(default_factory=list)
     
-    # Turn 0 Introduction Answer
+    # Turn 0 Introduction Answer & Dynamic Signals
     introduction_response: Optional[str] = None
+    introduction_skills: List[str] = Field(default_factory=list)
+    introduction_domains: List[str] = Field(default_factory=list)
+    introduction_experience_years: Optional[float] = None
+    skill_provenance: Dict[str, str] = Field(default_factory=dict)
 
     # Job Description Evidence
     has_jd: bool = False
@@ -207,10 +572,12 @@ class CandidateContext(BaseModel):
         """Produce a clean, factual summary of candidate evidence for LLM prompt grounding."""
         if not self.has_resume:
             intro_snippet = f"\n- Intro Statement: {self.introduction_response}" if self.introduction_response else ""
+            intro_skills_str = f"\n- Candidate-Declared Skills (from intro): {', '.join(self.skills)}" if self.skills else ""
+            exp_str = f"\n- Stated Experience: {self.experience_years} years" if self.experience_years > 0 else ""
             return (
                 f"- Candidate Target: {self.seniority_level.capitalize()} {self.target_role}\n"
                 f"- Focus Area: {self.interview_focus}\n"
-                f"- Resume Status: No uploaded resume attached (evaluating on role fundamentals).{intro_snippet}"
+                f"- Resume Status: No uploaded resume attached (evaluating on candidate-declared background & role fundamentals).{intro_skills_str}{exp_str}{intro_snippet}"
             )
 
         lines: List[str] = [
@@ -221,6 +588,8 @@ class CandidateContext(BaseModel):
             lines.append(f"- Domains: {', '.join(self.domains)}")
         if self.skills:
             lines.append(f"- Verified Skills: {', '.join(self.skills[:15])}")
+        if self.introduction_skills:
+            lines.append(f"- Intro-Declared Additional Skills: {', '.join(self.introduction_skills)}")
         if self.summary:
             lines.append(f"- Summary: {self.summary}")
 
@@ -285,10 +654,11 @@ def build_candidate_context(
     focus_skills: Optional[List[str]] = None,
     introduction_response: Optional[str] = None,
 ) -> CandidateContext:
-    """Build a validated, non-hallucinated CandidateContext instance from session and resume data."""
+    """Build a validated, non-hallucinated CandidateContext instance from session, resume, and Turn 0 signals."""
     # 1. Parse Resume Data if provided
     has_resume = bool(resume_data and isinstance(resume_data, dict))
     skills: List[str] = []
+    skill_provenance: Dict[str, str] = {}
     experience_years = 0.0
     domains: List[str] = []
     education: List[Dict[str, Any]] = []
@@ -297,7 +667,14 @@ def build_candidate_context(
     work_history: List[CandidateWorkContext] = []
 
     if has_resume and resume_data:
-        skills = list(resume_data.get("skills") or [])
+        raw_skills = list(resume_data.get("skills") or [])
+        for s in raw_skills:
+            if s and s.strip():
+                clean_s = s.strip()
+                if clean_s not in skills:
+                    skills.append(clean_s)
+                    skill_provenance[clean_s] = "resume"
+
         experience_years = float(resume_data.get("experience_years") or 0.0)
         domains = list(resume_data.get("domains") or [])
         education = list(resume_data.get("education") or [])
@@ -337,8 +714,40 @@ def build_candidate_context(
         for fs in focus_skills:
             if fs and fs not in skills:
                 skills.append(fs)
+                skill_provenance[fs] = "session_preset"
 
-    # 3. Parse JD Data if provided
+    # 3. Dynamic Signal Extraction from Turn 0 Introduction Response
+    intro_skills: List[str] = []
+    intro_domains: List[str] = []
+    intro_exp_years: Optional[float] = None
+
+    if introduction_response and introduction_response.strip():
+        extracted = extract_candidate_signals_from_intro(introduction_response)
+        extracted_skills_list = extracted.get("skills", [])
+        intro_domains = extracted.get("domains", [])
+        intro_exp_years = extracted.get("experience_years")
+
+        # Merge extracted skills without duplicating normalized resume skills
+        norm_existing = {normalize_skill(s) for s in skills}
+        for iskill in extracted_skills_list:
+            norm_iskill = normalize_skill(iskill)
+            if norm_iskill not in norm_existing:
+                skills.append(iskill)
+                intro_skills.append(iskill)
+                norm_existing.add(norm_iskill)
+                skill_provenance[iskill] = "introduction"
+
+        # Merge extracted domains
+        for idom in intro_domains:
+            if idom not in domains:
+                domains.append(idom)
+
+        # Enforce experience years if candidate provided explicit experience and resume had 0.0
+        if intro_exp_years is not None:
+            if experience_years == 0.0:
+                experience_years = intro_exp_years
+
+    # 4. Parse JD Data if provided
     has_jd = bool(parsed_jd_data and isinstance(parsed_jd_data, dict))
     jd_title: Optional[str] = None
     jd_required: List[str] = []
@@ -353,13 +762,13 @@ def build_candidate_context(
         jd_tech = list(parsed_jd_data.get("key_technologies") or [])
         jd_exp_summary = parsed_jd_data.get("experience_summary")
 
-    # Combine all JD skill requirements for matching
+    # Combine all JD skill requirements for matching against enriched candidate skills
     all_jd_skills = list(dict.fromkeys(jd_required + jd_tech))
     matched_skills, missing_skills = compute_matched_and_missing_skills(
         resume_skills=skills, jd_skills=all_jd_skills
     )
 
-    # 4. Formulate high-priority areas
+    # 5. Formulate high-priority areas
     high_priority: List[str] = []
     if projects:
         high_priority.append("candidate_projects")
@@ -385,6 +794,10 @@ def build_candidate_context(
         projects=projects,
         work_history=work_history,
         introduction_response=introduction_response.strip() if introduction_response else None,
+        introduction_skills=intro_skills,
+        introduction_domains=intro_domains,
+        introduction_experience_years=intro_exp_years,
+        skill_provenance=skill_provenance,
         has_jd=has_jd,
         jd_title=jd_title,
         jd_required_skills=jd_required,
@@ -395,3 +808,4 @@ def build_candidate_context(
         missing_skills=missing_skills,
         high_priority_areas=high_priority,
     )
+
