@@ -653,3 +653,248 @@ def test_jd_grounded_question_selection():
     assert plan.intent == QuestionIntent.JD_REQUIREMENT
     assert plan.topic in ("Terraform", "Kubernetes")
 
+
+# ============================================================================
+# PHASE 4.5R REGRESSION INVARIANT TESTS (STEP 4 & STEP 10 SPECIFICATIONS)
+# ============================================================================
+
+
+@pytest.fixture
+def sem_engine():
+    return SemanticEvaluatorEngine()
+
+
+@pytest.fixture
+def score_calibrator():
+    from app.services.score_calibrator import ScoreCalibrator
+    return ScoreCalibrator()
+
+
+@pytest.fixture
+def sample_norm_payload():
+    return QuestionReferencePayload(
+        source="unit_test",
+        reference_answer="Normalization decomposes tables into normal forms (1NF, 2NF, 3NF/BCNF) to eliminate redundancy and prevent update/insert/delete anomalies.",
+        primary_concept="Database Normalization",
+        question_text="Explain database normalization.",
+        expected_concepts=[
+            ExpectedConcept(concept="redundancy", importance=ConceptImportance.CORE),
+            ExpectedConcept(concept="normal forms", importance=ConceptImportance.CORE),
+            ExpectedConcept(concept="anomalies", importance=ConceptImportance.CORE),
+        ],
+    )
+
+
+def test_phase4_5r_i_dont_know_non_answer(sem_engine, score_calibrator, sample_norm_payload):
+    """Test 1: 'I don't know' -> NON_ANSWER, score 0 across all 5 dimensions."""
+    res = sem_engine.evaluate_turn_semantics("I don't know", sample_norm_payload, sample_norm_payload.question_text, "technical")
+    assert res.assigned_tier == AnswerQualityTier.NON_ANSWER
+    assert res.completeness == CompletenessLevel.NONE
+    assert res.is_relevant is False
+    assert res.is_correct is False
+
+    cal = score_calibrator.calibrate_turn(res, None, 0, "technical")
+    assert cal.assigned_tier == AnswerQualityTier.NON_ANSWER
+    assert cal.relevance_score == 0
+    assert cal.correctness_score == 0
+    assert cal.keywords_score == 0
+    assert cal.clarity_score == 0
+    assert cal.confidence_score == 0
+    assert cal.turn_score == 0
+
+
+def test_phase4_5r_i_dont_know_the_answer_non_answer(sem_engine, score_calibrator, sample_norm_payload):
+    """Test 2: 'I don't know the answer' -> NON_ANSWER, score 0."""
+    res = sem_engine.evaluate_turn_semantics("I don't know the answer", sample_norm_payload, sample_norm_payload.question_text, "technical")
+    assert res.assigned_tier == AnswerQualityTier.NON_ANSWER
+    cal = score_calibrator.calibrate_turn(res, None, 0, "technical")
+    assert cal.assigned_tier == AnswerQualityTier.NON_ANSWER
+    assert cal.turn_score == 0
+
+
+def test_phase4_5r_mujhe_nahi_pata_non_answer(sem_engine, score_calibrator, sample_norm_payload):
+    """Test 3: 'mujhe nahi pata' -> NON_ANSWER, score 0."""
+    res = sem_engine.evaluate_turn_semantics("mujhe nahi pata", sample_norm_payload, sample_norm_payload.question_text, "technical")
+    assert res.assigned_tier == AnswerQualityTier.NON_ANSWER
+    cal = score_calibrator.calibrate_turn(res, None, 0, "technical")
+    assert cal.assigned_tier == AnswerQualityTier.NON_ANSWER
+    assert cal.turn_score == 0
+
+
+def test_phase4_5r_skip_pass_tier(sem_engine, score_calibrator, sample_norm_payload):
+    """Test 4: 'skip' -> PASS (or NON_ANSWER), score 0."""
+    res = sem_engine.evaluate_turn_semantics("skip", sample_norm_payload, sample_norm_payload.question_text, "technical")
+    assert res.assigned_tier in (AnswerQualityTier.PASS, AnswerQualityTier.NON_ANSWER)
+    cal = score_calibrator.calibrate_turn(res, None, 0, "technical")
+    assert cal.assigned_tier in (AnswerQualityTier.PASS, AnswerQualityTier.NON_ANSWER)
+    assert cal.turn_score == 0
+
+
+def test_phase4_5r_pass_pass_tier(sem_engine, score_calibrator, sample_norm_payload):
+    """Test 5: 'pass' -> PASS, score 0."""
+    res = sem_engine.evaluate_turn_semantics("pass", sample_norm_payload, sample_norm_payload.question_text, "technical")
+    assert res.assigned_tier == AnswerQualityTier.PASS
+    cal = score_calibrator.calibrate_turn(res, None, 0, "technical")
+    assert cal.assigned_tier == AnswerQualityTier.PASS
+    assert cal.turn_score == 0
+
+
+def test_phase4_5r_i_have_no_idea_about_topic(sem_engine, score_calibrator, sample_norm_payload):
+    """Test 6: 'I have no idea about distributed locks.' -> NON_ANSWER, score 0."""
+    res = sem_engine.evaluate_turn_semantics("I have no idea about distributed locks.", sample_norm_payload, "Explain distributed locks", "technical")
+    assert res.assigned_tier == AnswerQualityTier.NON_ANSWER
+    cal = score_calibrator.calibrate_turn(res, None, 0, "technical")
+    assert cal.assigned_tier == AnswerQualityTier.NON_ANSWER
+    assert cal.turn_score == 0
+
+
+def test_phase4_5r_technically_weak_attempt(sem_engine, score_calibrator, sample_norm_payload):
+    """Test 7: 'It helps fast.' -> WEAK, composite <= 45."""
+    res = sem_engine.evaluate_turn_semantics("It helps fast.", sample_norm_payload, sample_norm_payload.question_text, "technical")
+    assert res.assigned_tier == AnswerQualityTier.WEAK
+    assert res.completeness == CompletenessLevel.INSUFFICIENT
+    cal = score_calibrator.calibrate_turn(res, {"relevance_score": 40, "correctness_score": 20}, 40, "technical")
+    assert cal.assigned_tier == AnswerQualityTier.WEAK
+    assert cal.turn_score <= 45
+
+
+def test_phase4_5r_technically_incorrect_contradiction(sem_engine, score_calibrator, sample_norm_payload):
+    """Test 8: 'Normalization increases redundancy.' -> INCORRECT, correctness <= 20, composite <= 30."""
+    res = sem_engine.evaluate_turn_semantics("Normalization increases redundancy.", sample_norm_payload, sample_norm_payload.question_text, "technical")
+    assert res.assigned_tier == AnswerQualityTier.INCORRECT
+    assert res.is_correct is False
+    assert len(res.contradicted_claims) > 0
+
+    cal = score_calibrator.calibrate_turn(res, {"relevance_score": 60, "correctness_score": 15}, 50, "technical")
+    assert cal.assigned_tier == AnswerQualityTier.INCORRECT
+    assert cal.correctness_score <= 20
+    assert cal.turn_score <= 30
+
+
+def test_phase4_5r_http_get_delete_contradiction(sem_engine, score_calibrator):
+    """Test 8b: 'HTTP GET is used to delete records and mutate database tables.' -> INCORRECT, composite <= 30."""
+    p8_ref = QuestionReferencePayload(
+        source="unit_test",
+        reference_answer="HTTP GET is safe and idempotent and must not modify server state.",
+        primary_concept="HTTP Semantics",
+        question_text="Explain the idempotency of HTTP GET.",
+        expected_concepts=[
+            ExpectedConcept(concept="idempotent", importance=ConceptImportance.CORE),
+            ExpectedConcept(concept="read-only", importance=ConceptImportance.CORE),
+        ],
+    )
+    res = sem_engine.evaluate_turn_semantics(
+        "HTTP GET is used to delete records and mutate database tables.",
+        p8_ref,
+        p8_ref.question_text,
+        "technical",
+    )
+    assert res.assigned_tier == AnswerQualityTier.INCORRECT
+    assert res.is_correct is False
+    assert len(res.contradicted_claims) > 0
+
+    cal = score_calibrator.calibrate_turn(res, {"relevance_score": 60, "correctness_score": 10}, 50, "technical")
+    assert cal.assigned_tier == AnswerQualityTier.INCORRECT
+    assert cal.correctness_score <= 20
+    assert cal.turn_score <= 30
+
+
+def test_phase4_5r_irrelevant_frontend_for_sql(sem_engine, score_calibrator, sample_norm_payload):
+    """Test 9: React answer for SQL normalization -> IRRELEVANT, technical credit = 0, composite = 0."""
+    res = sem_engine.evaluate_turn_semantics(
+        "React uses useState and useEffect to handle UI updates in components.",
+        sample_norm_payload,
+        sample_norm_payload.question_text,
+        "technical",
+    )
+    assert res.assigned_tier == AnswerQualityTier.IRRELEVANT
+    assert res.is_relevant is False
+    cal = score_calibrator.calibrate_turn(res, {"clarity_score": 80}, 70, "technical")
+    assert cal.assigned_tier == AnswerQualityTier.IRRELEVANT
+    assert cal.relevance_score == 0
+    assert cal.correctness_score == 0
+    assert cal.keywords_score == 0
+    assert cal.turn_score == 0
+
+
+def test_phase4_5r_correct_partial_bounded(sem_engine, score_calibrator, sample_norm_payload):
+    """Test 10: 'Normalization removes redundancy.' -> PARTIAL, composite 50-75, never STRONG."""
+    res = sem_engine.evaluate_turn_semantics("Normalization removes redundancy.", sample_norm_payload, sample_norm_payload.question_text, "technical")
+    assert res.assigned_tier == AnswerQualityTier.PARTIAL
+    assert res.completeness == CompletenessLevel.PARTIAL
+
+    cal = score_calibrator.calibrate_turn(res, {"relevance_score": 90, "correctness_score": 90}, 80, "technical")
+    assert cal.assigned_tier == AnswerQualityTier.PARTIAL
+    assert 50 <= cal.turn_score <= 75
+    assert cal.assigned_tier != AnswerQualityTier.STRONG
+
+
+def test_phase4_5r_correct_complete_strong(sem_engine, score_calibrator, sample_norm_payload):
+    """Test 11: Full normalization answer -> STRONG, COMPLETE, composite >= 78."""
+    full_ans = "Normalization organizes database tables through 1NF, 2NF, and 3NF normal forms to eliminate data redundancy and prevent insert, update, and delete anomalies."
+    res = sem_engine.evaluate_turn_semantics(full_ans, sample_norm_payload, sample_norm_payload.question_text, "technical")
+    assert res.assigned_tier == AnswerQualityTier.STRONG
+    assert res.completeness == CompletenessLevel.COMPLETE
+
+    cal = score_calibrator.calibrate_turn(res, {"relevance_score": 95, "correctness_score": 95}, 90, "technical")
+    assert cal.assigned_tier == AnswerQualityTier.STRONG
+    assert cal.turn_score >= 78
+
+
+def test_phase4_5r_short_exact_strong(sem_engine, score_calibrator):
+    """Test 12: 'O(1).' for single-fact time complexity -> STRONG, COMPLETE, composite >= 85."""
+    o1_ref = QuestionReferencePayload(
+        source="unit_test",
+        reference_answer="Hash table average lookup time complexity is O(1).",
+        primary_concept="Time Complexity",
+        question_text="What is the average time complexity of hash table lookup?",
+        expected_concepts=[ExpectedConcept(concept="O(1)", importance=ConceptImportance.CORE)],
+    )
+    res = sem_engine.evaluate_turn_semantics("O(1).", o1_ref, o1_ref.question_text, "technical")
+    assert res.assigned_tier == AnswerQualityTier.STRONG
+    assert res.completeness == CompletenessLevel.COMPLETE
+
+    cal = score_calibrator.calibrate_turn(res, {"relevance_score": 95, "correctness_score": 95}, 90, "technical")
+    assert cal.assigned_tier == AnswerQualityTier.STRONG
+    assert cal.turn_score >= 85
+
+
+@pytest.mark.asyncio
+async def test_phase4_5r_decision_and_evaluation_separation(sem_engine, score_calibrator):
+    """Test 13: Non-answer evaluation tier remains NON_ANSWER while adaptive decision advances cleanly without probe."""
+    gemini = GeminiService()
+    p_ref = QuestionReferencePayload(
+        source="unit_test",
+        reference_answer="Consistent hashing with virtual nodes minimizes data movement.",
+        primary_concept="Consistent Hashing",
+        question_text="Explain consistent hashing.",
+        expected_concepts=[ExpectedConcept(concept="virtual nodes", importance=ConceptImportance.CORE)],
+    )
+    ans = "I have no idea about distributed locks."
+    sem = sem_engine.evaluate_turn_semantics(ans, p_ref, p_ref.question_text, "technical")
+    cal = score_calibrator.calibrate_turn(sem, None, 0, "technical")
+
+    # Evaluation state is immutable
+    assert sem.assigned_tier == AnswerQualityTier.NON_ANSWER
+    assert cal.assigned_tier == AnswerQualityTier.NON_ANSWER
+    assert cal.turn_score == 0
+
+    # Adaptive decision progresses cleanly
+    decision = await gemini.evaluate_and_generate_next_turn(
+        target_role="Junior Backend",
+        seniority_level="junior",
+        interview_focus="technical",
+        focus_skills=["Python"],
+        current_turn_index=1,
+        remaining_core_questions=3,
+        remaining_followup_budget=2,
+        prior_turn_was_followup=False,
+        previous_question=p_ref.question_text,
+        candidate_answer=ans,
+        transcript_history=[],
+        preferred_language="en",
+        semantic_result=sem,
+    )
+    assert decision.is_follow_up is False
+
+

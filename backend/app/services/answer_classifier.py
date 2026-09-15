@@ -121,6 +121,9 @@ NON_ANSWER_EXACT_OR_PREFIX: List[str] = [
     "main nahi janta",
     "maine ispar kaam nahi kiya",
     "is baare mein nahi pata",
+    "iske baare mein nahi pata",
+    "kuch idea nahi hai",
+    "kuch idea nahi",
 ]
 
 # Polite filler additions that don't add technical content
@@ -137,11 +140,14 @@ POLITE_FILLERS: Set[str] = {
     "to be honest",
     "honestly",
     "actually",
+    "about",
     "about this",
     "on this topic",
     "for this",
     "yaar",
     "bhai",
+    "the", "a", "an", "is", "of", "to", "in", "for", "on", "with", "as",
+    "answer", "question", "topic", "this", "that", "it",
 }
 
 # Substantive conjunctions indicating hedged but legitimate answers
@@ -223,7 +229,7 @@ def is_pure_non_answer(normalized_text: str) -> Tuple[bool, Optional[str]]:
     has_substantive_connector = False
     for conn in SUBSTANTIVE_CONNECTORS:
         norm_conn = normalize_answer_text(conn)
-        if f" {norm_conn} " in f" {clean} ":
+        if f" {norm_conn} " in f" {clean} " or clean.startswith(f"{norm_conn} "):
             has_substantive_connector = True
             break
 
@@ -244,15 +250,17 @@ def is_pure_non_answer(normalized_text: str) -> Tuple[bool, Optional[str]]:
         if clean == pattern_norm:
             return True, pattern
 
-        # 2. Pattern with polite fillers (e.g. "i dont know sorry", "sorry no idea sir")
-        if pattern_norm in clean:
+        # 2. Pattern match in text without substantive connector
+        if pattern_norm in clean and not has_substantive_connector:
             # Check remaining words outside the pattern
             remaining_words = [
                 w for w in words if w not in pattern_words and w not in POLITE_FILLERS
             ]
-            # If all other words are polite fillers and word count is short (<= 8), it's a pure non-answer
-            if len(remaining_words) == 0 or (len(remaining_words) <= 2 and total_words <= 8 and not has_substantive_connector):
+            # If all other words are polite fillers, or it's a short topic-scoped statement of lack of knowledge (<= 12 words)
+            if len(remaining_words) == 0 or total_words <= 12:
                 return True, pattern
+
+    return False, None
 
     return False, None
 

@@ -103,16 +103,26 @@ STOP_WORDS = {
 }
 
 CONTRADICTION_PATTERNS: List[Tuple[re.Pattern, str]] = [
-    (re.compile(r"(primary key|pk).*(allows?|permit|accepts?|can have).*(duplicate|null)", re.IGNORECASE),
-     "Claim that primary key allows duplicate or null values contradicts relational integrity constraints."),
-    (re.compile(r"(put).*(never|not|isn'?t).*(idempotent)", re.IGNORECASE),
-     "Claim that HTTP PUT is not idempotent contradicts RFC 9110 HTTP semantics."),
-    (re.compile(r"(index|indexing).*(makes?|accelerates?).*(write|insert|update).*faster", re.IGNORECASE),
-     "Claim that database indexes accelerate write/insert operations contradicts index tree update overhead."),
-    (re.compile(r"(normalization).*(increases?|creates?).*(redundancy|duplicate)", re.IGNORECASE),
-     "Claim that normalization increases redundancy contradicts database normalization principles."),
-    (re.compile(r"(get).*(modifies|changes|updates|deletes|creates).*(database|server state|resource)", re.IGNORECASE),
-     "Claim that GET request mutates server state contradicts safe/idempotent HTTP retrieval semantics."),
+    (
+        re.compile(r"(primary key|pk).*(allows?|permit|permits?|accepts?|can have|can contain).*(duplicate|duplicates|null|nulls)", re.IGNORECASE),
+        "Claim that primary key allows duplicate or null values contradicts relational integrity constraints.",
+    ),
+    (
+        re.compile(r"(put).*(never|not|isn'?t|cannot be|is not).*(idempotent)", re.IGNORECASE),
+        "Claim that HTTP PUT is not idempotent contradicts RFC 9110 HTTP semantics.",
+    ),
+    (
+        re.compile(r"(index|indexing).*(makes?|accelerates?|speeds? up).*(write|insert|update|delete).*faster", re.IGNORECASE),
+        "Claim that database indexes accelerate write/insert operations contradicts index tree update overhead.",
+    ),
+    (
+        re.compile(r"(normalization).*(increases?|creates?|adds?|causes?).*(redundancy|duplicate|duplicates)", re.IGNORECASE),
+        "Claim that normalization increases redundancy contradicts database normalization principles.",
+    ),
+    (
+        re.compile(r"(get|http get).*(modifi|chang|updat|delet|creat|mutat|drop|destroy|is used to (delete|mutate|modify|change|update|create|drop|destroy)).*(database|server state|resource|table|records?|data)", re.IGNORECASE),
+        "Claim that GET request mutates server state contradicts safe/idempotent HTTP retrieval semantics.",
+    ),
 ]
 
 
@@ -147,9 +157,7 @@ def _is_concept_supported_in_text(concept: ExpectedConcept, answer_text: str) ->
 
     # 2. Short valid answer direct concept entity match (e.g., candidate answered "GET", concept is "HTTP GET", "O(1)")
     if is_short_valid_answer(answer_text):
-        if norm_ans and (norm_ans in norm_concept or norm_concept in norm_ans):
-            return True, concept_name
-        if any(w in norm_ans for w in concept_words if len(w) >= 2 and w not in STOP_WORDS):
+        if norm_ans and (norm_ans == norm_concept or f" {norm_ans} " in f" {norm_concept} " or f" {norm_concept} " in f" {norm_ans} "):
             return True, concept_name
         for syn_list in MULTILINGUAL_CONCEPT_MAP.values():
             if any(syn == norm_ans for syn in syn_list) and any(syn in norm_concept for syn in syn_list):
@@ -168,7 +176,7 @@ def _is_concept_supported_in_text(concept: ExpectedConcept, answer_text: str) ->
                     w for w in clause_sig
                     if any((w == aw or (len(w) >= 4 and len(aw) >= 4 and aw not in COMMON_NON_TECHNICAL_WORDS and (w.startswith(aw[:4]) or aw.startswith(w[:4])))) for aw in ans_words)
                 ]
-                threshold = 1 if len(clause_sig) <= 2 else max(2, len(clause_sig) // 2)
+                threshold = len(clause_sig) if len(clause_sig) <= 2 else max(2, len(clause_sig) - 1)
                 if len(matches) >= threshold:
                     return True, clause
 
@@ -200,7 +208,7 @@ def _is_concept_supported_in_text(concept: ExpectedConcept, answer_text: str) ->
             elif len(w) >= 4 and any((len(aw) >= 4 and aw not in COMMON_NON_TECHNICAL_WORDS and (aw.startswith(w[:4]) or w.startswith(aw[:4]))) for aw in ans_words):
                 matches.append(w)
 
-        threshold = 1 if len(sig_words) <= 2 else max(2, len(sig_words) // 2)
+        threshold = len(sig_words) if len(sig_words) <= 2 else max(2, len(sig_words) - 1)
         if len(matches) >= threshold:
             return True, " ".join(matches)
 
