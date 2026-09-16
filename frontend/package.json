@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:auth": "node tests/api_client.test.js",
+    "test:coach": "node tests/coach_turn_explorer.test.js",
+    "test": "node tests/api_client.test.js && node tests/coach_turn_explorer.test.js"
   },
   "dependencies": {
     "html2canvas": "^1.4.1",
