@@ -247,10 +247,41 @@ async def test_resume_upload_oversized_file_fails(client: AsyncClient):
     token = reg_res.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
-    # 5.1 MB of dummy bytes
-    huge_bytes = b"%PDF-" + b"0" * (5 * 1024 * 1024 + 100)
-    files = {"file": ("huge.pdf", huge_bytes, "application/pdf")}
-
+    files = {"file": ("oversized.pdf", b"%PDF-1.4\n" + b"0" * (5 * 1024 * 1024 + 1024), "application/pdf")}
     res = await client.post("/api/v1/resumes/upload", headers=headers, files=files)
     assert res.status_code == 422
     assert "exceeds maximum allowed size" in res.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_resume_upload_gemini_503_returns_accurate_resume_analysis_message(client: AsyncClient):
+    """Verify endpoint propagates HTTP 503 with resume analysis message rather than evaluation message."""
+    reg_res = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "gemini503test@example.com",
+            "password": "StrongPassword!123",
+            "full_name": "Gemini Test Candidate",
+        },
+    )
+    token = reg_res.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    docx_bytes = create_sample_docx("Valid candidate resume text for 503 propagation test with Python and FastAPI.")
+    files = {"file": ("test.docx", docx_bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+
+    from app.core.exceptions import AppError
+    with patch("app.services.gemini_service.GeminiService.parse_resume", new_callable=AsyncMock) as mock_parse:
+        mock_parse.side_effect = AppError(
+            message="AI resume analysis service is temporarily unavailable. Please retry shortly.",
+            status_code=503,
+            error_code="AI_SERVICE_UNAVAILABLE",
+        )
+        res = await client.post("/api/v1/resumes/upload", headers=headers, files=files)
+
+        assert res.status_code == 503
+        data = res.json()
+        assert data["detail"] == "AI resume analysis service is temporarily unavailable. Please retry shortly."
+        assert data["error_code"] == "AI_SERVICE_UNAVAILABLE"
+        assert "evaluation" not in data["detail"].lower()
+

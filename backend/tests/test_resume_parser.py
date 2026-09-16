@@ -179,12 +179,37 @@ async def test_gemini_service_retry_on_transient_failure():
 
 
 @pytest.mark.asyncio
-async def test_gemini_service_unrecoverable_failure_raises_503():
-    """Verify GeminiService raises HTTP 503 AI_SERVICE_UNAVAILABLE on permanent failure."""
+async def test_gemini_service_503_transient_retries_and_succeeds():
+    """Verify GeminiService retries on 503 Service Unavailable and returns valid data on retry."""
     service = GeminiService(api_key="mock_key", model="gemini-2.5-flash")
 
+    mock_json_payload = (
+        '{"skills": ["Python", "FastAPI"], "experience_years": 4.0, "domains": ["Backend Systems"], '
+        '"education": [], "summary": "Python engineer.", "projects": [], "work_history": []}'
+    )
+    mock_success_response = MagicMock()
+    mock_success_response.text = mock_json_payload
+
     with patch.object(service.client.aio.models, "generate_content", new_callable=AsyncMock) as mock_gen:
-        mock_gen.side_effect = RuntimeError("Provider outage")
+        from google.genai.errors import APIError
+        err_503 = APIError(503, {"error": {"code": 503, "message": "This model is currently experiencing high demand.", "status": "UNAVAILABLE"}})
+        mock_gen.side_effect = [err_503, mock_success_response]
+
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            result = await service.parse_resume("Sample resume text...")
+
+            assert result.skills == ["Python", "FastAPI"]
+            assert mock_gen.call_count == 2
+            assert mock_sleep.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_gemini_service_unrecoverable_failure_raises_503():
+    """Verify GeminiService raises HTTP 503 AI_SERVICE_UNAVAILABLE with resume analysis terminology."""
+    service = GeminiService(api_key="mock_key_secret_12345", model="gemini-2.5-flash")
+
+    with patch.object(service.client.aio.models, "generate_content", new_callable=AsyncMock) as mock_gen:
+        mock_gen.side_effect = RuntimeError("503 Service Unavailable: High Demand")
 
         with patch("asyncio.sleep", new_callable=AsyncMock):
             with pytest.raises(AppError) as exc_info:
@@ -192,5 +217,80 @@ async def test_gemini_service_unrecoverable_failure_raises_503():
 
             assert exc_info.value.status_code == 503
             assert exc_info.value.error_code == "AI_SERVICE_UNAVAILABLE"
+            assert exc_info.value.message == "AI resume analysis service is temporarily unavailable. Please retry shortly."
+            assert "evaluation" not in exc_info.value.message.lower()
+            assert "mock_key_secret_12345" not in exc_info.value.message
             assert mock_gen.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_gemini_service_timeout_retries_and_raises_safe_error():
+    """Verify GeminiService retries on TimeoutError and raises sanitized 503 without credential leak."""
+    service = GeminiService(api_key="secret_api_key_abcxyz", model="gemini-2.5-flash")
+
+    with patch.object(service.client.aio.models, "generate_content", new_callable=AsyncMock) as mock_gen:
+        mock_gen.side_effect = TimeoutError("Request timed out after 30000ms")
+
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            with pytest.raises(AppError) as exc_info:
+                await service.parse_resume("Sample resume text...")
+
+            assert exc_info.value.status_code == 503
+            assert exc_info.value.error_code == "AI_SERVICE_UNAVAILABLE"
+            assert exc_info.value.message == "AI resume analysis service is temporarily unavailable. Please retry shortly."
+            assert "secret_api_key_abcxyz" not in exc_info.value.message
+            assert "TimeoutError" not in exc_info.value.message
+            assert mock_gen.call_count == 2
+            assert mock_sleep.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_gemini_service_429_quota_exhausted_fails_fast_without_retry():
+    """Verify 429 RESOURCE_EXHAUSTED fails fast with exactly ONE provider invocation and NO sleep retry."""
+    service = GeminiService(api_key="secret_key_987654", model="gemini-3.6-flash")
+
+    with patch.object(service.client.aio.models, "generate_content", new_callable=AsyncMock) as mock_gen:
+        from google.genai.errors import APIError
+        quota_err = APIError(
+            429,
+            {"error": {"code": 429, "message": "RESOURCE_EXHAUSTED: Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests", "status": "RESOURCE_EXHAUSTED"}},
+        )
+        mock_gen.side_effect = quota_err
+
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            with pytest.raises(AppError) as exc_info:
+                await service.parse_resume("Sample candidate resume text...")
+
+            assert exc_info.value.status_code == 503
+            assert exc_info.value.error_code == "AI_SERVICE_UNAVAILABLE"
+            assert exc_info.value.message == "AI resume analysis service is temporarily unavailable. Please retry shortly."
+            assert "secret_key_987654" not in exc_info.value.message
+            assert "RESOURCE_EXHAUSTED" not in exc_info.value.message
+            assert "quota" not in exc_info.value.message.lower()
+            # Must make EXACTLY ONE call — no retry on exhausted quota
+            assert mock_gen.call_count == 1
+            assert mock_sleep.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_gemini_service_permanent_client_error_does_not_retry():
+    """Verify non-transient 400/404 errors do not retry and map cleanly to sanitized AppError."""
+    service = GeminiService(api_key="secret_key_111222", model="gemini-invalid")
+
+    with patch.object(service.client.aio.models, "generate_content", new_callable=AsyncMock) as mock_gen:
+        from google.genai.errors import APIError
+        err_404 = APIError(404, {"error": {"code": 404, "message": "models/gemini-invalid is not found", "status": "NOT_FOUND"}})
+        mock_gen.side_effect = err_404
+
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            with pytest.raises(AppError) as exc_info:
+                await service.parse_resume("Sample candidate resume text...")
+
+            assert exc_info.value.status_code == 503
+            assert exc_info.value.error_code == "AI_SERVICE_UNAVAILABLE"
+            assert exc_info.value.message == "AI resume analysis service is temporarily unavailable. Please retry shortly."
+            assert "secret_key_111222" not in exc_info.value.message
+            assert mock_gen.call_count == 1
+            assert mock_sleep.call_count == 0
+
 

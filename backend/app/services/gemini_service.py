@@ -625,6 +625,77 @@ class ParsedJobDescription(BaseModel):
     )
 
 
+def _is_transient_gemini_error(exc: Optional[Exception]) -> bool:
+    """Classify whether a Gemini API / network failure is transient and eligible for retry.
+
+    Retryable:
+    - HTTP 503 UNAVAILABLE (high demand, temporary backend capacity)
+    - HTTP 502 BAD_GATEWAY / HTTP 504 GATEWAY_TIMEOUT
+    - TimeoutError / asyncio.TimeoutError / ConnectionError / network timeouts
+
+    Non-Retryable (Fail Fast on Attempt 1):
+    - HTTP 429 RESOURCE_EXHAUSTED (quota exhaustion / daily rate limits)
+    - HTTP 400 INVALID_ARGUMENT / bad request
+    - HTTP 401 UNAUTHENTICATED / HTTP 403 PERMISSION_DENIED (invalid API key)
+    - HTTP 404 NOT_FOUND (model unavailable / deprecated)
+    - Any other client-side 4xx error
+    """
+    if exc is None:
+        return False
+
+    # 1. Check network and timeout exceptions
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError, ConnectionError)):
+        return True
+
+    exc_name = type(exc).__name__.lower()
+    if "timeout" in exc_name or "connecterror" in exc_name or "networkerror" in exc_name:
+        return True
+
+    # 2. Check structured google.genai / httpx status codes
+    code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+    if isinstance(code, int):
+        if code in (503, 502, 504):
+            return True
+        if code == 429 or (400 <= code < 500):
+            return False
+        if code >= 500:
+            return True
+
+    # 3. Check status string (e.g. from Google RPC / APIError)
+    status_str = str(getattr(exc, "status", "")).upper()
+    if status_str == "UNAVAILABLE":
+        return True
+    if status_str in ("RESOURCE_EXHAUSTED", "INVALID_ARGUMENT", "UNAUTHENTICATED", "PERMISSION_DENIED", "NOT_FOUND"):
+        return False
+
+    # 4. String inspection fallback for wrapped / mock exceptions
+    msg = str(exc)
+    msg_upper = msg.upper()
+
+    if "429" in msg_upper or "RESOURCE_EXHAUSTED" in msg_upper or "QUOTA" in msg_upper:
+        return False
+    if "400" in msg_upper or "INVALID_ARGUMENT" in msg_upper:
+        return False
+    if "401" in msg_upper or "403" in msg_upper or "UNAUTHENTICATED" in msg_upper or "PERMISSION_DENIED" in msg_upper:
+        return False
+    if "404" in msg_upper or "NOT_FOUND" in msg_upper:
+        return False
+    if "503" in msg_upper or "UNAVAILABLE" in msg_upper or "TIMEOUT" in msg_upper or "502" in msg_upper or "504" in msg_upper:
+        return True
+
+    return False
+
+
+def _sanitize_log_message(exc: Optional[Exception], api_key: Optional[str] = None) -> str:
+    """Sanitize error messages for server-side logging without leaking secrets or full prompts."""
+    if exc is None:
+        return "Unknown error"
+    msg = str(exc)
+    if api_key and api_key in msg:
+        msg = msg.replace(api_key, "[REDACTED_API_KEY]")
+    return msg
+
+
 class GeminiService:
     """Service for interacting with Google Gemini models using the google-genai SDK."""
 
@@ -643,7 +714,7 @@ class GeminiService:
         return self._client
 
     async def parse_resume(self, raw_text: str) -> ParsedResumeData:
-        """Parse raw resume text into structured Pydantic schema using Gemini with 1 retry."""
+        """Parse raw resume text into structured Pydantic schema using Gemini with bounded retry on transient errors."""
         prompt = RESUME_EXTRACTION_PROMPT_TEMPLATE.format(raw_text=raw_text)
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
@@ -673,26 +744,35 @@ class GeminiService:
                     f"Gemini structured response schema parsing error on attempt {attempt}: {parse_err}"
                 )
                 last_exception = parse_err
+                if attempt < max_attempts:
+                    await asyncio.sleep(1.0)
+                    continue
             except Exception as exc:
+                is_transient = _is_transient_gemini_error(exc)
                 logger.warning(
-                    f"Gemini API request failed on attempt {attempt}/{max_attempts}: {exc}"
+                    f"Gemini API request failed on attempt {attempt}/{max_attempts} "
+                    f"[model={self.model}, transient={is_transient}]: {_sanitize_log_message(exc, self.api_key)}"
                 )
                 last_exception = exc
 
-            if attempt < max_attempts:
-                await asyncio.sleep(1.0)
+                # If the error is non-transient (e.g. 429 Quota Exhausted, 401/403, 400, 404), fail fast without retry
+                if not is_transient:
+                    break
+
+                if attempt < max_attempts:
+                    await asyncio.sleep(1.0)
 
         logger.error(
-            f"Gemini structured resume extraction failed after {max_attempts} attempts: {last_exception}"
+            f"Gemini structured resume extraction failed after attempt(s): {_sanitize_log_message(last_exception, self.api_key)}"
         )
         raise AppError(
-            message="AI evaluation service is temporarily unavailable. Please retry shortly.",
+            message="AI resume analysis service is temporarily unavailable. Please retry shortly.",
             status_code=503,
             error_code="AI_SERVICE_UNAVAILABLE",
         )
 
     async def parse_job_description(self, raw_text: str) -> ParsedJobDescription:
-        """Parse raw Job Description text into structured requirements."""
+        """Parse raw Job Description text into structured requirements with bounded retry on transient errors."""
         prompt = JD_EXTRACTION_PROMPT_TEMPLATE.format(raw_text=raw_text)
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
@@ -722,17 +802,25 @@ class GeminiService:
                     f"Gemini JD response schema parsing error on attempt {attempt}: {parse_err}"
                 )
                 last_exception = parse_err
+                if attempt < max_attempts:
+                    await asyncio.sleep(1.0)
+                    continue
             except Exception as exc:
+                is_transient = _is_transient_gemini_error(exc)
                 logger.warning(
-                    f"Gemini JD request failed on attempt {attempt}/{max_attempts}: {exc}"
+                    f"Gemini JD request failed on attempt {attempt}/{max_attempts} "
+                    f"[model={self.model}, transient={is_transient}]: {_sanitize_log_message(exc, self.api_key)}"
                 )
                 last_exception = exc
 
-            if attempt < max_attempts:
-                await asyncio.sleep(1.0)
+                if not is_transient:
+                    break
+
+                if attempt < max_attempts:
+                    await asyncio.sleep(1.0)
 
         logger.warning(
-            f"Gemini JD extraction failed after {max_attempts} attempts: {last_exception}. Falling back to default empty extraction."
+            f"Gemini JD extraction failed after attempt(s): {_sanitize_log_message(last_exception, self.api_key)}. Falling back to default empty extraction."
         )
         return ParsedJobDescription(
             job_title=None,
@@ -814,16 +902,21 @@ class GeminiService:
                     if parsed.question_text and parsed.question_text.strip():
                         return parsed
             except Exception as exc:
+                is_transient = _is_transient_gemini_error(exc)
                 logger.warning(
-                    f"Gemini initial question generation attempt {attempt}/{max_attempts} failed: {exc}"
+                    f"Gemini initial question generation attempt {attempt}/{max_attempts} failed "
+                    f"[model={self.model}, transient={is_transient}]: {_sanitize_log_message(exc, self.api_key)}"
                 )
                 last_exception = exc
+
+                if not is_transient:
+                    break
 
             if attempt < max_attempts:
                 await asyncio.sleep(1.0)
 
         logger.warning(
-            f"Initial question generation failed: {last_exception}. Using grounded fallback."
+            f"Initial question generation failed after attempt(s): {_sanitize_log_message(last_exception, self.api_key)}. Using grounded fallback."
         )
         return get_grounded_fallback_question(
             context=candidate_context,
@@ -1097,16 +1190,21 @@ class GeminiService:
                     elif parsed.question_text and parsed.question_text.strip():
                         return parsed
             except Exception as exc:
+                is_transient = _is_transient_gemini_error(exc)
                 logger.warning(
-                    f"Gemini next turn generation attempt {attempt}/{max_attempts} failed: {exc}"
+                    f"Gemini next turn generation attempt {attempt}/{max_attempts} failed "
+                    f"[model={self.model}, transient={is_transient}]: {_sanitize_log_message(exc, self.api_key)}"
                 )
                 last_exception = exc
+
+                if not is_transient:
+                    break
 
             if attempt < max_attempts:
                 await asyncio.sleep(1.0)
 
         logger.warning(
-            f"Adaptive next turn generation failed: {last_exception}. Using grounded fallback decision."
+            f"Adaptive next turn generation failed after attempt(s): {_sanitize_log_message(last_exception, self.api_key)}. Using grounded fallback decision."
         )
 
         # 1. If all core questions are completed and no follow-up is warranted, end session cleanly
@@ -1219,16 +1317,21 @@ class GeminiService:
                 if response.text:
                     return SessionEvaluationReport.model_validate_json(response.text)
             except Exception as exc:
+                is_transient = _is_transient_gemini_error(exc)
                 logger.warning(
-                    f"Gemini session evaluation attempt {attempt}/{max_attempts} failed: {exc}"
+                    f"Gemini session evaluation attempt {attempt}/{max_attempts} failed "
+                    f"[model={self.model}, transient={is_transient}]: {_sanitize_log_message(exc, self.api_key)}"
                 )
                 last_exception = exc
+
+                if not is_transient:
+                    break
 
             if attempt < max_attempts:
                 await asyncio.sleep(1.0)
 
         logger.warning(
-            f"Session evaluation generation failed: {last_exception}. Using fallback evaluation report."
+            f"Session evaluation generation failed after attempt(s): {_sanitize_log_message(last_exception, self.api_key)}. Using fallback evaluation report."
         )
         return _build_fallback_evaluation_report(
             transcript_turns=transcript_turns,
