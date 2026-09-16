@@ -16,8 +16,7 @@ import math
 import re
 from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 
-from google.genai import types
-from sqlalchemy import inspect, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -38,7 +37,6 @@ from app.schemas.progress import (
     ScoreProgressionPointDTO,
     WeaknessResolutionStateDTO,
 )
-from app.services.gemini_service import GeminiService, get_gemini_service
 
 logger = logging.getLogger(__name__)
 
@@ -903,50 +901,17 @@ class ProgressIntelligenceService:
 
         return True
 
+    def clear_insight_cache(self) -> None:
+        """Clear cache if present (no-op retained for backwards compatibility)."""
+        pass
+
     async def generate_ai_insight(
         self,
         progress: DashboardProgressResponse,
         candidate_name: str = "Candidate",
-        gemini_service: Optional[GeminiService] = None,
+        gemini_service: Optional[Any] = None,
     ) -> DashboardAIInsightDTO:
-        """Synthesize a grounded AI Insight Card based on verified progress evidence with deterministic fallback."""
-        if progress.total_completed_interviews == 0:
-            return self.build_deterministic_fallback_insight(progress, candidate_name)
-
-        evidence_text = self.build_grounded_insight_context(progress, candidate_name)
-        prompt = DASHBOARD_INSIGHT_PROMPT_TEMPLATE.format(
-            candidate_name=candidate_name,
-            candidate_evidence=evidence_text,
-        )
-
-        gemini = gemini_service or get_gemini_service()
-        config = types.GenerateContentConfig(
-            system_instruction=INSIGHT_SYSTEM_INSTRUCTION,
-            response_mime_type="application/json",
-            response_schema=DashboardAIInsightDTO,
-            temperature=0.2,
-        )
-
-        max_attempts = 2
-        for attempt in range(1, max_attempts + 1):
-            try:
-                response = await gemini.client.aio.models.generate_content(
-                    model=gemini.model,
-                    contents=prompt,
-                    config=config,
-                )
-                if response.text and response.text.strip():
-                    parsed = DashboardAIInsightDTO.model_validate_json(response.text)
-                    if self._validate_insight_grounding(parsed, progress):
-                        parsed.source_type = "ai_grounded"
-                        return parsed
-            except Exception as exc:
-                logger.warning(
-                    f"Gemini dashboard insight generation attempt {attempt}/{max_attempts} failed: {exc}"
-                )
-                if attempt < max_attempts:
-                    await asyncio.sleep(0.5)
-
+        """Synthesize an authoritative, grounded Progress Insight Card based strictly on deterministic analytics evidence (zero Gemini API calls)."""
         return self.build_deterministic_fallback_insight(progress, candidate_name)
 
     def compute_candidate_current_state(

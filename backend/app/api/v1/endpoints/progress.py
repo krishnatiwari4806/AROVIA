@@ -10,7 +10,6 @@ from app.core.rate_limit import limiter
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.progress import DashboardAIInsightDTO, DashboardProgressResponse
-from app.services.gemini_service import GeminiService, get_gemini_service
 from app.services.progress_service import (
     ProgressIntelligenceService,
     get_progress_service,
@@ -60,7 +59,7 @@ async def get_user_progress(
     status_code=status.HTTP_200_OK,
     summary="Get grounded AI Insight Card for candidate dashboard",
 )
-@limiter.limit("30/minute")
+@limiter.limit("60/minute")
 async def get_dashboard_ai_insight(
     request: Request,
     response: Response,
@@ -69,11 +68,10 @@ async def get_dashboard_ai_insight(
     progress_service: Annotated[
         ProgressIntelligenceService, Depends(get_progress_service)
     ],
-    gemini_service: Annotated[GeminiService, Depends(get_gemini_service)],
 ) -> DashboardAIInsightDTO:
-    """Generate a grounded, personalized AI performance insight synthesized over verified progress evidence.
+    """Generate a grounded, personalized performance insight synthesized over verified progress evidence.
 
-    Uses deterministic fallback when zero sessions exist or if external AI calls fail.
+    100% deterministic, grounded, and Gemini-free.
     """
     progress = await progress_service.get_user_progress(
         db=db,
@@ -83,6 +81,5 @@ async def get_dashboard_ai_insight(
     return await progress_service.generate_ai_insight(
         progress=progress,
         candidate_name=candidate_name,
-        gemini_service=gemini_service,
     )
 
