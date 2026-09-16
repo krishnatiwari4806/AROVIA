@@ -19,6 +19,9 @@ import {
   BookOpen,
   MessageSquare,
   HelpCircle,
+  Play,
+  Clock,
+  RefreshCw,
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { useSpeechRecognition } from '../../hooks/useSpeechRecognition';
@@ -120,7 +123,7 @@ export function CoachView({ sessionId, onBack, onViewReport, onStartSetup }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState(null);
   const [autoPlayVoice, setAutoPlayVoice] = useState(false);
-  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'turns' | 'longitudinal'
+  const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'turns'
 
   const messageEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -159,29 +162,50 @@ export function CoachView({ sessionId, onBack, onViewReport, onStartSetup }) {
     setLoading(true);
     setError(null);
     try {
-      // 1. Fetch target interview session evaluation & metadata if sessionId exists
+      // 1. Fetch target interview session evaluation & metadata if sessionId exists or find authoritative recent session
       let targetSessionId = sessionId;
 
       if (!targetSessionId) {
-        // Find most recent completed session for candidate
-        const sessions = await api.getUserSessions(10, 0).catch(() => []);
-        const completed = sessions.find((s) => s.status === 'completed' && s.has_evaluation);
-        if (completed) {
-          targetSessionId = completed.id;
+        // Query authoritative session archive without masking API/auth failures
+        const sessions = await api.getUserSessions(10, 0);
+        if (Array.isArray(sessions) && sessions.length > 0) {
+          const completed = sessions.find((s) => s.status === 'completed' && s.has_evaluation);
+          if (completed) {
+            targetSessionId = completed.id;
+          } else {
+            const inProgress = sessions.find((s) => s.status === 'in_progress' || s.status === 'evaluating');
+            if (inProgress) {
+              targetSessionId = inProgress.id;
+            }
+          }
         }
       }
 
       if (targetSessionId) {
-        const sess = await api.getSession(targetSessionId).catch(() => null);
-        const evalData = await api.getSessionEvaluation(targetSessionId).catch(() => null);
+        const sess = await api.getSession(targetSessionId);
+        let evalData = null;
+        if (sess && (sess.has_evaluation || sess.status === 'completed')) {
+          try {
+            evalData = await api.getSessionEvaluation(targetSessionId);
+          } catch (evalErr) {
+            // 404 indicates evaluation record is legitimately not yet generated
+            if (evalErr && evalErr.status === 404) {
+              evalData = null;
+            } else {
+              throw evalErr;
+            }
+          }
+        }
         setSessionData({
           ...sess,
           evaluation: evalData,
         });
+      } else {
+        setSessionData(null);
       }
 
       // 2. Initialize or fetch Coach conversation
-      const convData = await api.getOrCreateCoachConversation(targetSessionId, true);
+      const convData = await api.getOrCreateCoachConversation(targetSessionId || null, true);
       setConversation(convData);
       setMessages(convData.messages || []);
       setSuggestedFollowups(convData.suggested_followups || []);
@@ -198,6 +222,8 @@ export function CoachView({ sessionId, onBack, onViewReport, onStartSetup }) {
     } catch (err) {
       console.error('Failed to initialize AI Coach conversation:', err);
       setError(err?.message || 'Unable to connect to Personal AI Coach.');
+      setSessionData(null);
+      setConversation(null);
     } finally {
       setLoading(false);
     }
@@ -308,10 +334,57 @@ export function CoachView({ sessionId, onBack, onViewReport, onStartSetup }) {
     );
   }
 
+  // Dedicated Error Screen if initialization or authentication failed completely
+  if (!conversation && error) {
+    return (
+      <div className="coach-error-screen">
+        <div className="coach-error-card">
+          <div className="coach-error-icon-box">
+            <AlertCircle size={36} className="text-danger" />
+          </div>
+          <h3 className="error-title">Unable to Connect to Personal AI Coach</h3>
+          <p className="error-desc">{error}</p>
+          <div className="error-actions">
+            <button className="coach-primary-btn" onClick={loadCoachSession}>
+              <RefreshCw size={15} />
+              <span>Retry Connection</span>
+            </button>
+            {onBack && (
+              <button className="coach-secondary-btn" onClick={onBack}>
+                <ArrowLeft size={15} />
+                <span>Go Back</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const roleName = sessionData?.target_role || 'Technical Interview Track';
   const seniority = sessionData?.seniority_level || 'Senior';
   const overallScore = sessionData?.overall_score ?? (sessionData?.evaluation?.overall_score || null);
   const turnsList = sessionData?.turns || sessionData?.evaluation?.turns_evaluation || [];
+
+  // Determine Turn Explorer rendering state:
+  // - 'zero_interviews': Candidate has no completed or active interview session yet
+  // - 'in_progress': Interview is active/evaluating without finalized score report
+  // - 'missing_turns': Completed session exists with evaluation, but turn data is genuinely empty
+  // - 'ready': Turn details exist and are ready for inspection
+  let turnState = 'ready';
+  if (!sessionData) {
+    turnState = 'zero_interviews';
+  } else if (
+    sessionData.status === 'in_progress' ||
+    sessionData.status === 'evaluating' ||
+    (!sessionData.has_evaluation && sessionData.status !== 'completed')
+  ) {
+    turnState = 'in_progress';
+  } else if (turnsList.length === 0) {
+    turnState = 'missing_turns';
+  } else {
+    turnState = 'ready';
+  }
 
   return (
     <div className="coach-view-container">
@@ -600,9 +673,38 @@ export function CoachView({ sessionId, onBack, onViewReport, onStartSetup }) {
             </p>
 
             <div className="turns-accordion-list">
-              {turnsList.length === 0 ? (
-                <div className="no-turns-placeholder">
-                  <p>No turn details available for this session.</p>
+              {turnState === 'zero_interviews' ? (
+                <div className="no-turns-placeholder onboarding-placeholder">
+                  <Sparkles size={28} className="placeholder-icon text-secondary" />
+                  <h4 className="placeholder-title">No Interview Data Yet</h4>
+                  <p className="placeholder-desc">
+                    Complete your first interview to unlock turn-by-turn coaching.
+                  </p>
+                  {onStartSetup && (
+                    <button
+                      className="turn-onboarding-cta-btn"
+                      onClick={() => onStartSetup()}
+                    >
+                      <Play size={13} />
+                      <span>Start First Interview</span>
+                    </button>
+                  )}
+                </div>
+              ) : turnState === 'in_progress' ? (
+                <div className="no-turns-placeholder in-progress-placeholder">
+                  <Clock size={28} className="placeholder-icon text-primary" />
+                  <h4 className="placeholder-title">Interview In Progress</h4>
+                  <p className="placeholder-desc">
+                    Complete your current interview to unlock detailed turn analysis.
+                  </p>
+                </div>
+              ) : turnState === 'missing_turns' ? (
+                <div className="no-turns-placeholder unavailable-placeholder">
+                  <AlertCircle size={28} className="placeholder-icon text-warning" />
+                  <h4 className="placeholder-title">Turn Analysis Unavailable</h4>
+                  <p className="placeholder-desc">
+                    Turn analysis is unavailable for this session.
+                  </p>
                 </div>
               ) : (
                 turnsList.map((turn, idx) => {

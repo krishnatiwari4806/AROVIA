@@ -10,7 +10,12 @@ from pydantic import BaseModel, Field, ValidationError as PydanticValidationErro
 
 from app.core.exceptions import AppError
 from app.services.coach_context_builder import CoachContextPayload
-from app.services.gemini_service import GeminiService, get_gemini_service
+from app.services.gemini_service import (
+    GeminiService,
+    _is_transient_gemini_error,
+    _sanitize_log_message,
+    get_gemini_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -124,9 +129,13 @@ class CoachAIService:
                 if response.text and response.text.strip():
                     return response.text.strip()
             except Exception as exc:
+                is_transient = _is_transient_gemini_error(exc)
                 logger.warning(
-                    f"Gemini coach initial debrief attempt {attempt}/{max_attempts} failed: {exc}"
+                    f"Gemini coach initial debrief attempt {attempt}/{max_attempts} failed "
+                    f"[model={self.gemini.model}, transient={is_transient}]: {_sanitize_log_message(exc, getattr(self.gemini, 'api_key', None))}"
                 )
+                if not is_transient:
+                    break
                 if attempt < max_attempts:
                     await asyncio.sleep(1.0)
 
@@ -186,9 +195,13 @@ class CoachAIService:
                         "suggested_followups": parsed.suggested_followups[:3],
                     }
             except Exception as exc:
+                is_transient = _is_transient_gemini_error(exc)
                 logger.warning(
-                    f"Gemini coach chat attempt {attempt}/{max_attempts} failed: {exc}"
+                    f"Gemini coach chat attempt {attempt}/{max_attempts} failed "
+                    f"[model={self.gemini.model}, transient={is_transient}]: {_sanitize_log_message(exc, getattr(self.gemini, 'api_key', None))}"
                 )
+                if not is_transient:
+                    break
                 if attempt < max_attempts:
                     await asyncio.sleep(1.0)
 

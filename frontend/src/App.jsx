@@ -108,6 +108,27 @@ export function App() {
   useEffect(() => {
     applySystemSettings();
     verifyAuthSession();
+
+    const handleSessionExpired = () => {
+      setUser(null);
+      setActiveSessionId(null);
+      setSelectedReportId(null);
+      setCurrentView('dashboard');
+    };
+
+    const handleTokenRefreshed = (e) => {
+      if (e?.detail?.user) {
+        setUser(e.detail.user);
+      }
+    };
+
+    window.addEventListener('arovia_session_expired', handleSessionExpired);
+    window.addEventListener('arovia_token_refreshed', handleTokenRefreshed);
+
+    return () => {
+      window.removeEventListener('arovia_session_expired', handleSessionExpired);
+      window.removeEventListener('arovia_token_refreshed', handleTokenRefreshed);
+    };
   }, [verifyAuthSession]);
 
   useEffect(() => {

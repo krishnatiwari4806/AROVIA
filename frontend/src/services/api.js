@@ -1,19 +1,82 @@
 /**
  * API client service for AROVIA backend endpoints.
+ * Includes single-flight transparent access-token refresh and request retry.
  */
 
 const API_BASE = '/api/v1';
+
+let refreshPromise = null;
 
 function getAuthHeader() {
   const token = localStorage.getItem('arovia_token');
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/**
+ * Execute single-flight refresh request to /auth/refresh using HttpOnly cookie.
+ * If multiple requests fail with TOKEN_EXPIRED concurrently, only ONE refresh request is dispatched.
+ */
+async function getRefreshedToken() {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      try {
+        const response = await fetch(`${API_BASE}/auth/refresh`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+
+        const data = await response.json().catch(() => ({}));
+
+        if (response.ok && data && data.access_token) {
+          localStorage.setItem('arovia_token', data.access_token);
+          if (data.user) {
+            try {
+              localStorage.setItem('arovia_candidate_profile', JSON.stringify(data.user));
+            } catch {
+              // ignore storage serialization errors
+            }
+          }
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent('arovia_token_refreshed', { detail: data })
+            );
+          }
+          return data.access_token;
+        } else {
+          // Refresh token invalid or expired; clear stale authentication
+          localStorage.removeItem('arovia_token');
+          localStorage.removeItem('arovia_candidate_profile');
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('arovia_session_expired'));
+          }
+          return null;
+        }
+      } catch (err) {
+        localStorage.removeItem('arovia_token');
+        localStorage.removeItem('arovia_candidate_profile');
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('arovia_session_expired'));
+        }
+        return null;
+      } finally {
+        refreshPromise = null;
+      }
+    })();
+  }
+  return refreshPromise;
+}
+
 async function request(endpoint, options = {}) {
   const url = `${API_BASE}${endpoint}`;
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  const authHeader = options.headers?.Authorization ? {} : getAuthHeader();
+
   const headers = {
-    'Content-Type': 'application/json',
-    ...getAuthHeader(),
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+    ...authHeader,
     ...options.headers,
   };
 
@@ -36,6 +99,34 @@ async function request(endpoint, options = {}) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
+    const isTokenExpired =
+      response.status === 401 &&
+      (data.error_code === 'TOKEN_EXPIRED' ||
+        data.code === 'TOKEN_EXPIRED' ||
+        (typeof data.detail === 'string' && data.detail.includes('Access token has expired')));
+
+    const isAuthEndpoint =
+      endpoint === '/auth/login' ||
+      endpoint === '/auth/register' ||
+      endpoint === '/auth/google' ||
+      endpoint === '/auth/refresh';
+
+    // Transparent single-flight refresh and retry if access token expired
+    if (isTokenExpired && !options._isRetry && !isAuthEndpoint) {
+      const newToken = await getRefreshedToken();
+      if (newToken) {
+        const retryHeaders = {
+          ...options.headers,
+          Authorization: `Bearer ${newToken}`,
+        };
+        return request(endpoint, {
+          ...options,
+          headers: retryHeaders,
+          _isRetry: true,
+        });
+      }
+    }
+
     let errorMsg = 'API request failed';
 
     if (Array.isArray(data.errors) && data.errors.length > 0) {
@@ -171,25 +262,13 @@ export const api = {
 
   // Resume Ingestion & Career Profile
   getMyResume: () => request('/resumes/me'),
-  uploadResume: async (file) => {
+  uploadResume: (file) => {
     const formData = new FormData();
     formData.append('file', file);
-    const token = localStorage.getItem('arovia_token');
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-
-    const response = await fetch(`${API_BASE}/resumes/upload`, {
+    return request('/resumes/upload', {
       method: 'POST',
-      headers,
       body: formData,
     });
-    const data = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      const error = new Error(data.detail || data.message || 'Resume upload failed');
-      error.status = response.status;
-      throw error;
-    }
-    return data;
   },
   deleteResume: () => request('/resumes/me', { method: 'DELETE' }),
 };
