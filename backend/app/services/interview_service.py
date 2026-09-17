@@ -379,17 +379,17 @@ class InterviewService:
                 message="Cannot start an interview that is not in progress."
             )
 
-        # Check if turns already exist
+        # Check if turns already exist: return the latest active turn
         turns_query = (
             select(InterviewQuestionTurn)
             .where(InterviewQuestionTurn.session_id == session.id)
-            .order_by(InterviewQuestionTurn.turn_index.asc())
+            .order_by(InterviewQuestionTurn.turn_index.desc())
         )
         turns_res = await db.execute(turns_query)
-        existing_turns = turns_res.scalars().all()
+        latest_turn = turns_res.scalars().first()
 
-        if existing_turns:
-            return existing_turns[0]
+        if latest_turn:
+            return latest_turn
 
         # Generate Turn 0 conversational introduction warm-up prompt respecting preferred_language
         pref_lang = getattr(session, "preferred_language", "en") or "en"
