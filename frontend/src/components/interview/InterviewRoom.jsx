@@ -38,8 +38,24 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
 
   const { speak, cancel, isSpeaking } = useSpeechSynthesis();
 
-  const handleTranscript = useCallback((text) => {
-    setCandidateAnswer(text);
+  // Stable references to prevent lifecycle cascading loops
+  const baseTextRef = useRef('');
+  const currentTurnIdRef = useRef(currentTurn?.id);
+  const cancelRef = useRef(cancel);
+
+  useEffect(() => {
+    currentTurnIdRef.current = currentTurn?.id;
+  }, [currentTurn?.id]);
+
+  const handleTranscript = useCallback((text, transcriptTurnId) => {
+    // Phase 6: Guard against stale transcript callbacks belonging to prior turns
+    if (transcriptTurnId && currentTurnIdRef.current && transcriptTurnId !== currentTurnIdRef.current) {
+      return;
+    }
+    // Phase 7: Clean merge preserving pre-existing typed text
+    const prefix = baseTextRef.current ? baseTextRef.current.trim() : '';
+    const combined = prefix ? `${prefix} ${text}` : text;
+    setCandidateAnswer(combined);
   }, []);
 
   const {
@@ -53,6 +69,25 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
     preferredLanguage: session?.preferred_language,
   });
 
+  const stopListeningRef = useRef(stopListening);
+
+  useEffect(() => {
+    cancelRef.current = cancel;
+    stopListeningRef.current = stopListening;
+  });
+
+  const speakTurnQuestion = useCallback((questionText, preferredLang) => {
+    if (!questionText) return;
+    const settings = getAroviaSettings();
+    const autoPlay = settings.languageVoice?.autoPlayQuestions !== false;
+    if (autoPlay) {
+      speak(questionText, null, {
+        language: preferredLang || 'en-US',
+      });
+    }
+  }, [speak]);
+
+  // Phase 1 & 2: Safe, decoupled initialization flow
   const initRoom = useCallback(async () => {
     if (!sessionId) {
       setLoading(false);
@@ -71,43 +106,68 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
       }
       setSession(sess);
 
-      // 2. Start session (idempotent) or retrieve active turn
+      // 2. Safe Turn Retrieval: Always attempt to fetch the current active turn first
       let turn;
       try {
-        turn = await api.startInterview(sessionId);
-      } catch {
         turn = await api.getCurrentTurn(sessionId);
+      } catch (currentTurnErr) {
+        const isNotFound =
+          currentTurnErr?.code === 'TURN_NOT_FOUND' ||
+          currentTurnErr?.status === 404 ||
+          currentTurnErr?.message?.toLowerCase().includes('no active question turns') ||
+          currentTurnErr?.message?.toLowerCase().includes('not found');
+
+        if (isNotFound) {
+          // Genuinely 0 turns exist -> Start the interview to generate Turn 0
+          turn = await api.startInterview(sessionId);
+        } else {
+          // Real network or server error: do not silently reset
+          throw currentTurnErr;
+        }
       }
 
       if (!turn) {
-        throw new Error('Unable to retrieve initial question turn from server.');
+        throw new Error('Unable to retrieve active question turn from server.');
       }
 
       setCurrentTurn(turn);
       setCandidateAnswer('');
+      baseTextRef.current = '';
+      setElapsedDurationSec(0);
 
-      const settings = getAroviaSettings();
-      const autoPlay = settings.languageVoice?.autoPlayQuestions !== false;
-
-      if (turn && turn.question_text && autoPlay) {
-        speak(turn.question_text);
-      }
+      const sessLang = sess.preferred_language || 'en';
+      speakTurnQuestion(turn.question_text, sessLang);
     } catch (err) {
       console.error('Failed to initialize interview room:', err);
       setError(err?.message || 'Could not load interview session from the server.');
     } finally {
       setLoading(false);
     }
-  }, [sessionId, speak]);
+  }, [sessionId, speakTurnQuestion]);
 
+  // Phase 1: Runs ONLY on mount or when sessionId changes. Unstable voice callbacks removed from dependencies.
   useEffect(() => {
     initRoom();
 
     return () => {
-      cancel();
-      stopListening();
+      cancelRef.current?.();
+      stopListeningRef.current?.();
     };
-  }, [initRoom, cancel, stopListening]);
+  }, [sessionId, initRoom]);
+
+  // Handler for microphone toggling with mutual exclusion & text preservation
+  const handleToggleListening = () => {
+    if (isListening) {
+      stopListening();
+      baseTextRef.current = candidateAnswer.trim();
+    } else {
+      if (isSpeaking) {
+        cancel();
+      }
+      baseTextRef.current = candidateAnswer.trim();
+      startListening(currentTurn?.id);
+    }
+  };
 
   // Submit current answer and advance to next turn
   const handleSubmitAnswer = async () => {
@@ -118,6 +178,7 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
       setError(null);
       stopListening();
       cancel();
+      baseTextRef.current = '';
 
       const answerToSubmit = candidateAnswer.trim() || 'No audible candidate response provided.';
       const payload = {
@@ -155,14 +216,14 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
               // Turn was advanced on server: recover silently
               setCurrentTurn(activeTurn);
               setCandidateAnswer('');
+              baseTextRef.current = '';
               setElapsedDurationSec(0);
               setError(null);
 
-              const settings = getAroviaSettings();
-              const autoPlay = settings.languageVoice?.autoPlayQuestions !== false;
-              if (activeTurn.question_text && autoPlay) {
-                speak(activeTurn.question_text);
-              }
+              speakTurnQuestion(
+                activeTurn.question_text,
+                sess?.preferred_language || session?.preferred_language
+              );
               return;
             } else if (activeTurn && activeTurn.id === currentTurn.id) {
               // Server still awaits this turn answer: preserve draft and prompt user to click submit
@@ -193,13 +254,13 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
         // Advance to next genuine turn from backend
         setCurrentTurn(nextTurnResult.next_turn);
         setCandidateAnswer('');
+        baseTextRef.current = '';
         setElapsedDurationSec(0);
 
-        const settings = getAroviaSettings();
-        const autoPlay = settings.languageVoice?.autoPlayQuestions !== false;
-        if (nextTurnResult.next_turn.question_text && autoPlay) {
-          speak(nextTurnResult.next_turn.question_text);
-        }
+        speakTurnQuestion(
+          nextTurnResult.next_turn.question_text,
+          session?.preferred_language || 'en'
+        );
       }
     } catch (err) {
       console.error('Error submitting answer or evaluating session:', err);
@@ -460,8 +521,16 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
                 type="button"
                 className="audio-replay-btn"
                 onClick={() => {
-                  if (isSpeaking) cancel();
-                  else if (currentTurn?.question_text) speak(currentTurn.question_text);
+                  if (isSpeaking) {
+                    cancel();
+                  } else if (currentTurn?.question_text) {
+                    if (isListening) {
+                      stopListening();
+                    }
+                    speak(currentTurn.question_text, null, {
+                      language: session?.preferred_language || 'en-US',
+                    });
+                  }
                 }}
                 title={isSpeaking ? 'Mute AI voice' : 'Replay question audio'}
               >
@@ -501,7 +570,10 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
                     : 'Click the square microphone button or type your answer here...'
                 }
                 value={candidateAnswer}
-                onChange={(e) => setCandidateAnswer(e.target.value)}
+                onChange={(e) => {
+                  setCandidateAnswer(e.target.value);
+                  baseTextRef.current = e.target.value;
+                }}
                 rows={7}
                 disabled={isEnding || submitting || isCompleted}
               />
@@ -521,7 +593,7 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
               <button
                 type="button"
                 className={`square-mic-btn ${isListening ? 'listening' : ''}`}
-                onClick={toggleListening}
+                onClick={handleToggleListening}
                 disabled={isEnding || submitting || isCompleted}
                 title={isListening ? 'Stop listening' : 'Start microphone dictation'}
               >
