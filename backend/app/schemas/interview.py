@@ -28,6 +28,7 @@ class PracticeMode(str, Enum):
 
     full = "full"
     quick = "quick"
+    system_design_staged = "system_design_staged"
 
 
 class PreferredLanguage(str, Enum):
