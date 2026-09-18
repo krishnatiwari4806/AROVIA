@@ -126,6 +126,57 @@ class EvaluationRubric(BaseModel):
     )
 
 
+class ArchitectureNode(BaseModel):
+    """Component node in a System Design reference architecture."""
+
+    id: str = Field(..., description="Unique node identifier within the diagram.")
+    label: str = Field(..., description="Human-readable title (e.g. 'Redis Sliding Window Cluster').")
+    type: str = Field(
+        ...,
+        description="Component classification: client, gateway, service, cache, database, queue, external.",
+    )
+    purpose: str = Field(
+        ..., description="Architectural responsibility of this component in the system."
+    )
+    is_core: bool = Field(
+        default=True,
+        description="True if this is a primary component for the solution; False if secondary/observability.",
+    )
+
+
+class ArchitectureEdge(BaseModel):
+    """Directed connection or protocol flow between architecture nodes."""
+
+    source: str = Field(..., description="Source node id.")
+    target: str = Field(..., description="Target node id.")
+    label: str = Field(..., description="Relationship description (e.g. 'Lookup Token Balance').")
+    protocol: Optional[str] = Field(
+        None, description="Communication protocol (e.g. https, grpc, sql, redis, kafka, ws)."
+    )
+    mode: Optional[str] = Field(
+        default="sync", description="Interaction mode: 'sync' or 'async'."
+    )
+
+
+class SystemDesignReferenceArchitecture(BaseModel):
+    """Deterministic, educational Senior Reference Architecture Blueprint for System Design turns."""
+
+    scenario_id: str = Field(..., description="Canonical scenario identifier.")
+    title: str = Field(..., description="Architectural blueprint title.")
+    description: str = Field(..., description="Summary of the senior-level reference design.")
+    nodes: List[ArchitectureNode] = Field(default_factory=list, description="Topological nodes.")
+    edges: List[ArchitectureEdge] = Field(default_factory=list, description="Topological directed edges.")
+    key_tradeoffs: List[str] = Field(
+        default_factory=list, description="Critical architectural trade-offs to evaluate."
+    )
+    failure_considerations: List[str] = Field(
+        default_factory=list, description="Failure modes, network partitions, and resilience mechanisms."
+    )
+    scaling_considerations: List[str] = Field(
+        default_factory=list, description="Horizontal scaling, partitioning, and bottleneck mitigation."
+    )
+
+
 class QuestionReferencePayload(BaseModel):
     """Complete authoritative reference answer, expected concepts, and rubric container for a question."""
 
@@ -145,6 +196,9 @@ class QuestionReferencePayload(BaseModel):
     )
     rubric: Optional[EvaluationRubric] = Field(
         None, description="Intent-calibrated evaluation rubric for this question."
+    )
+    architecture_blueprint: Optional[SystemDesignReferenceArchitecture] = Field(
+        None, description="Optional deterministic System Design reference blueprint."
     )
     source: str = Field(
         default="curated_deterministic",
@@ -268,6 +322,10 @@ class TurnEvaluationItem(BaseModel):
         None,
         description="Authoritative reference benchmark answer for this turn.",
     )
+    architecture_blueprint: Optional[SystemDesignReferenceArchitecture] = Field(
+        None,
+        description="Optional deterministic System Design reference blueprint for this turn.",
+    )
     ideal_answer_comparison: str = Field(
         ...,
         description="Concise comparison highlighting the gap against the senior benchmark response.",
@@ -348,6 +406,7 @@ class TurnEvaluationResponse(BaseModel):
     contradicted_claims: List[str] = Field(default_factory=list)
     unsupported_claims: List[str] = Field(default_factory=list)
     reference_answer: Optional[str] = None
+    architecture_blueprint: Optional[SystemDesignReferenceArchitecture] = None
     ideal_answer_comparison: Optional[str] = None
     turn_feedback: Optional[str] = None
     answer_quality_tier: Optional[AnswerQualityTier] = None
