@@ -19,6 +19,7 @@ from app.schemas.evaluation import (
     ImprovementItem,
     SessionEvaluationReportResponse,
     StrengthItem,
+    SystemDesignReferenceArchitecture,
     TurnEvaluationResponse,
 )
 from app.services.answer_classifier import (
@@ -255,6 +256,7 @@ class EvaluationService:
                 "unsupported_claims": unsupported_claims,
                 "reference_answer": ref_payload.reference_answer,
                 "rubric": ref_payload.rubric.model_dump() if ref_payload.rubric else None,
+                "architecture_blueprint": ref_payload.architecture_blueprint.model_dump() if ref_payload.architecture_blueprint else None,
                 "reference_source": ref_payload.source,
                 "is_candidate_specific": ref_payload.is_candidate_specific,
                 "ideal_answer_comparison": turn_ai_eval.ideal_answer_comparison if turn_ai_eval else "",
@@ -472,6 +474,16 @@ class EvaluationService:
                 except ValueError:
                     comp_enum = None
 
+            raw_blueprint = t_eval.get("architecture_blueprint")
+            arch_blueprint_obj = None
+            if isinstance(raw_blueprint, dict):
+                try:
+                    arch_blueprint_obj = SystemDesignReferenceArchitecture(**raw_blueprint)
+                except Exception:
+                    arch_blueprint_obj = None
+            elif isinstance(raw_blueprint, SystemDesignReferenceArchitecture):
+                arch_blueprint_obj = raw_blueprint
+
             ref_ans = t_eval.get("reference_answer") or t.ideal_answer
 
             turns_eval_resp.append(
@@ -506,6 +518,7 @@ class EvaluationService:
                     parent_turn_id=str(t.parent_turn_id) if isinstance(getattr(t, "parent_turn_id", None), str) else None,
                     remediation_note=t_eval.get("remediation_note") if isinstance(t_eval.get("remediation_note"), str) else None,
                     remediated_parent_concepts=t_eval.get("remediated_parent_concepts", []) if isinstance(t_eval.get("remediated_parent_concepts"), list) else [],
+                    architecture_blueprint=arch_blueprint_obj,
                 )
             )
 
