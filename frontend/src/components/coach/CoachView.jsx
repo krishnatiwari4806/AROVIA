@@ -316,6 +316,8 @@ export function CoachView({ sessionId, onBack, onViewReport, onStartSetup }) {
       prompt = `What is a senior-level benchmark model answer for Turn ${turnIndex + 1}?`;
     } else if (promptType === 'breakdown') {
       prompt = `Can you break down the trade-offs I missed in Turn ${turnIndex + 1}?`;
+    } else if (promptType === 'architecture') {
+      prompt = `Can you explain the reference architecture, component purposes, and key trade-offs for Turn ${turnIndex + 1}?`;
     }
     handleSendMessage(prompt, turnIndex);
     setActiveTab('chat');
@@ -500,13 +502,26 @@ export function CoachView({ sessionId, onBack, onViewReport, onStartSetup }) {
                   )}
 
                   <div className="coach-msg-bubble">
-                    {/* Optional Turn Context Tag */}
-                    {msg.context_turn_index !== null && msg.context_turn_index !== undefined && (
-                      <div className="turn-grounding-tag">
-                        <Layers size={12} />
-                        <span>Focused on Turn {msg.context_turn_index + 1}</span>
+                    {/* Optional Turn Context Tag & Reference Architecture Grounded Tag */}
+                    {(msg.context_turn_index !== null && msg.context_turn_index !== undefined) || (isCoach && conversation?.reference_architecture_context) ? (
+                      <div className="msg-grounding-tags-group">
+                        {msg.context_turn_index !== null && msg.context_turn_index !== undefined && (
+                          <div className="turn-grounding-tag">
+                            <Layers size={12} />
+                            <span>Focused on Turn {msg.context_turn_index + 1}</span>
+                          </div>
+                        )}
+                        {isCoach && (
+                          (msg.context_turn_index !== null && msg.context_turn_index !== undefined && turnsList[msg.context_turn_index]?.architecture_blueprint) ||
+                          (conversation?.reference_architecture_context && (msg.context_turn_index === null || msg.context_turn_index === undefined))
+                        ) && (
+                          <div className="turn-blueprint-grounded-tag" title="Grounded in System Design Reference Architecture">
+                            <Sparkles size={11} />
+                            <span>REFERENCE ARCHITECTURE GROUNDED</span>
+                          </div>
+                        )}
                       </div>
-                    )}
+                    ) : null}
 
                     {/* Formatted Content */}
                     <MarkdownRenderer content={msg.message_text} />
@@ -723,6 +738,11 @@ export function CoachView({ sessionId, onBack, onViewReport, onStartSetup }) {
                         onClick={() => setSelectedTurnIndex(isSelected ? null : turnIdx)}
                       >
                         <span className="turn-number-badge">Turn {turnIdx + 1}</span>
+                        {turn.architecture_blueprint && (
+                          <span className="turn-blueprint-indicator-badge" title="System Design Reference Blueprint Available">
+                            <Layers size={11} /> Blueprint
+                          </span>
+                        )}
                         <p className="turn-question-snippet">{qText}</p>
                         <span className="turn-score-badge">{score}/100</span>
                       </div>
@@ -756,6 +776,14 @@ export function CoachView({ sessionId, onBack, onViewReport, onStartSetup }) {
                             >
                               Get Senior Model Answer
                             </button>
+                            {turn.architecture_blueprint && (
+                              <button
+                                className="turn-prompt-action blueprint-action-btn"
+                                onClick={() => handleSelectTurnPrompt(turnIdx, 'architecture')}
+                              >
+                                <Layers size={12} /> Explain Reference Architecture
+                              </button>
+                            )}
                           </div>
                         </div>
                       )}
