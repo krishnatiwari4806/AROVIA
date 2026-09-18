@@ -4,9 +4,9 @@ import React from 'react';
  * 3D Floating Crystal / Hologram AI Core component matching Figma Interview Room.
  * Restrained, elegant floating with soft ambient spotlight and subtle voice reactivity.
  */
-export function CrystalCore({ isSpeaking = false, isListening = false, size = 150 }) {
+export function CrystalCore({ isSpeaking = false, isListening = false, isAnalyzing = false, size = 150 }) {
   return (
-    <div className={`arovia-crystal-core-wrapper ${isSpeaking ? 'speaking' : ''} ${isListening ? 'listening' : ''}`}>
+    <div className={`arovia-crystal-core-wrapper ${isSpeaking ? 'speaking' : ''} ${isListening ? 'listening' : ''} ${isAnalyzing ? 'analyzing' : ''}`}>
       {/* Soft Ambient Spotlight */}
       <div className="crystal-ambient-spotlight" />
 
