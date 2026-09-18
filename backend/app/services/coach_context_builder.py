@@ -125,6 +125,7 @@ class CoachContextPayload:
         jd_context: Optional[Dict[str, Any]] = None,
         actionable_plan: Optional[ActionableCoachingPlanDTO] = None,
         weakness_resolutions: Optional[List[WeaknessResolutionStateDTO]] = None,
+        reference_architecture_context: Optional[Dict[str, Any]] = None,
     ):
         self.candidate_name = candidate_name
         self.current_session = current_session
@@ -138,6 +139,7 @@ class CoachContextPayload:
         self.jd_context = jd_context or {}
         self.actionable_plan = actionable_plan
         self.weakness_resolutions = weakness_resolutions or []
+        self.reference_architecture_context = reference_architecture_context
 
     def to_prompt_context(self) -> str:
         """Render a concise, high-signal formatted text prompt block for Gemini."""
@@ -570,6 +572,82 @@ class CoachContextPayload:
             parts.append("No completed interview sessions on record. No active coaching plan generated.")
         parts.append("</deterministic_coaching_plan>")
 
+        # 8. Deterministic System Design Reference Architecture Grounding
+        if self.reference_architecture_context and isinstance(self.reference_architecture_context, dict):
+            bp = self.reference_architecture_context
+            parts.append("\n--- SYSTEM DESIGN REFERENCE ARCHITECTURE GROUNDING ---")
+            parts.append("<reference_architecture_context>")
+
+            title = bp.get("title") or "System Design Reference Architecture Blueprint"
+            scenario_id = bp.get("scenario_id") or ""
+            desc = bp.get("description") or ""
+
+            parts.append(f"Scenario: {title} ({scenario_id})")
+            if desc:
+                parts.append(f"Description: {_truncate_text(desc, 300)}")
+
+            # Nodes (bounded max 20)
+            raw_nodes = bp.get("nodes") or []
+            if isinstance(raw_nodes, list) and raw_nodes:
+                parts.append("\nReference Topology Nodes:")
+                for node in raw_nodes[:20]:
+                    if isinstance(node, dict):
+                        n_id = node.get("id", "")
+                        n_label = node.get("label", "")
+                        n_type = node.get("type", "component")
+                        n_role = "CORE" if node.get("is_core", True) is not False else "SECONDARY"
+                        n_purpose = _truncate_text(node.get("purpose", ""), 150)
+                        parts.append(f"- [ID: {n_id}] {n_label} (Type: {n_type}, Role: {n_role}): {n_purpose}")
+
+            # Directed Edges / Flows (bounded max 30)
+            raw_edges = bp.get("edges") or []
+            if isinstance(raw_edges, list) and raw_edges:
+                parts.append("\nReference Directed Interaction Flows:")
+                for edge in raw_edges[:30]:
+                    if isinstance(edge, dict):
+                        src = edge.get("source", "")
+                        tgt = edge.get("target", "")
+                        lbl = edge.get("label", "")
+                        proto = edge.get("protocol") or "standard"
+                        mode = (edge.get("mode") or "sync").upper()
+                        parts.append(f"- {src} -> {tgt} [{mode}] via {proto}: {lbl}")
+
+            # Key Trade-offs (bounded max 8)
+            tradeoffs = bp.get("key_tradeoffs") or []
+            if isinstance(tradeoffs, list) and tradeoffs:
+                parts.append("\nKey Architectural Trade-offs:")
+                for to in tradeoffs[:8]:
+                    if to and str(to).strip():
+                        parts.append(f"- {_truncate_text(str(to).strip(), 200)}")
+
+            # Failure Modes & Resilience (bounded max 8)
+            failures = bp.get("failure_considerations") or []
+            if isinstance(failures, list) and failures:
+                parts.append("\nFailure Modes & Resilience Considerations:")
+                for fc in failures[:8]:
+                    if fc and str(fc).strip():
+                        parts.append(f"- {_truncate_text(str(fc).strip(), 200)}")
+
+            # Scaling & Partitioning (bounded max 8)
+            scaling = bp.get("scaling_considerations") or []
+            if isinstance(scaling, list) and scaling:
+                parts.append("\nScaling & Partitioning Considerations:")
+                for sc in scaling[:8]:
+                    if sc and str(sc).strip():
+                        parts.append(f"- {_truncate_text(str(sc).strip(), 200)}")
+
+            # Candidate Architecture Alignment
+            cov = bp.get("covered_concepts")
+            mis = bp.get("missed_concepts")
+            if cov or mis:
+                parts.append("\nCandidate Architecture Alignment:")
+                if isinstance(cov, list) and cov:
+                    parts.append(f"- Demonstrated Concepts: {', '.join([str(c).strip() for c in cov[:20] if c])}")
+                if isinstance(mis, list) and mis:
+                    parts.append(f"- Missed Reference Considerations: {', '.join([str(m).strip() for m in mis[:20] if m])}")
+
+            parts.append("</reference_architecture_context>")
+
         return "\n".join(parts)
 
 
@@ -585,6 +663,7 @@ class CoachContextBuilder:
         current_user: User,
         session_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
+        context_turn_index: Optional[int] = None,
         max_history_messages: int = 10,
     ) -> CoachContextPayload:
         """Gather current session, evaluation report, turns, historical performance, and conversation history."""
@@ -677,6 +756,7 @@ class CoachContextBuilder:
                             "confidence_score": t.confidence_score,
                             "covered_concepts": eval_d.get("covered_concepts", []),
                             "missed_concepts": eval_d.get("missed_concepts", []),
+                            "architecture_blueprint": eval_d.get("architecture_blueprint"),
                             "ideal_answer_comparison": eval_d.get("ideal_answer_comparison", ""),
                             "turn_feedback": eval_d.get("turn_feedback", ""),
                         }
@@ -781,6 +861,25 @@ class CoachContextBuilder:
                     }
                 )
 
+        # 6. Resolve Active Reference Architecture Blueprint (System Design grounding)
+        active_blueprint = None
+        if transcript_turns:
+            if context_turn_index is not None and 0 <= context_turn_index < len(transcript_turns):
+                active_blueprint = transcript_turns[context_turn_index].get("architecture_blueprint")
+                if active_blueprint and isinstance(active_blueprint, dict):
+                    active_blueprint = dict(active_blueprint)
+                    active_blueprint.setdefault("covered_concepts", transcript_turns[context_turn_index].get("covered_concepts", []))
+                    active_blueprint.setdefault("missed_concepts", transcript_turns[context_turn_index].get("missed_concepts", []))
+
+            if not active_blueprint:
+                for turn_item in reversed(transcript_turns):
+                    candidate_bp = turn_item.get("architecture_blueprint")
+                    if candidate_bp and isinstance(candidate_bp, dict):
+                        active_blueprint = dict(candidate_bp)
+                        active_blueprint.setdefault("covered_concepts", turn_item.get("covered_concepts", []))
+                        active_blueprint.setdefault("missed_concepts", turn_item.get("missed_concepts", []))
+                        break
+
         candidate_name = current_user.full_name or "Candidate"
 
         return CoachContextPayload(
@@ -796,6 +895,7 @@ class CoachContextBuilder:
             jd_context=jd_context,
             actionable_plan=actionable_plan,
             weakness_resolutions=weakness_resolutions,
+            reference_architecture_context=active_blueprint,
         )
 
 
