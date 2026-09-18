@@ -2,9 +2,11 @@
 
 import logging
 import re
+import time
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Dict, List, Optional
 
+from fastapi import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,8 +45,22 @@ from app.services.question_planner import (
 )
 from app.services.reference_evaluator import get_reference_evaluator_service
 from app.services.semantic_evaluator import get_semantic_evaluator_engine
+from app.services.system_design_stage_tracker import (
+    STAGE_0_WARMUP,
+    STAGE_1_REQUIREMENTS,
+    STAGE_DEFINITIONS,
+    TOTAL_STAGED_ANSWER_TURNS,
+    TOTAL_STAGED_CORE_STAGES,
+    SystemDesignStage,
+    SystemDesignStageTracker,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def format_server_timing(timings: Dict[str, float]) -> str:
+    """Format timing metrics into RFC 9110 / W3C Server-Timing header string."""
+    return ", ".join(f"{name};dur={val:.1f}" for name, val in timings.items())
 
 
 def get_introduction_prompt(
@@ -93,6 +109,20 @@ def compute_turn_metadata(
             "total_core_questions": total_core,
             "follow_up_number": 0,
             "interview_phase": "introduction",
+        }
+
+    # Staged System Design Mode handling
+    if SystemDesignStageTracker.is_staged_session(session):
+        stage_idx = SystemDesignStageTracker.get_turn_stage_index(turn)
+        if stage_idx is None:
+            stage_idx = turn.turn_index
+        core_idx = max(0, stage_idx - 1) if stage_idx is not None else 0
+        return {
+            "core_question_index": core_idx,
+            "core_question_number": core_idx + 1,
+            "total_core_questions": TOTAL_STAGED_CORE_STAGES,
+            "follow_up_number": 0,
+            "interview_phase": "system_design_stage",
         }
 
     # Identify all core questions in chronological order
@@ -247,9 +277,12 @@ class InterviewService:
 
         # 2. Practice mode turn calibration
         # Turn 0 is intro + planned_core core questions + follow-ups
-        if request.practice_mode == PracticeMode.quick:
+        if request.practice_mode in (PracticeMode.quick, "quick"):
             planned_core = 3
             max_turns = 6  # 1 intro + 3 core + up to 2 follow-ups
+        elif request.practice_mode in (PracticeMode.system_design_staged, "system_design_staged"):
+            planned_core = TOTAL_STAGED_CORE_STAGES  # 4
+            max_turns = TOTAL_STAGED_ANSWER_TURNS    # 5 (1 intro + 4 core stages)
         else:
             planned_core = 6
             max_turns = 10  # 1 intro + 6 core + up to 3 follow-ups
@@ -364,12 +397,17 @@ class InterviewService:
         return session
 
     async def start_interview(
-        self, db: AsyncSession, current_user: User, session_id: str
+        self,
+        db: AsyncSession,
+        current_user: User,
+        session_id: str,
+        response: Optional[Response] = None,
     ) -> InterviewQuestionTurn:
         """Initialize interview turn loop by generating Turn 0 (Introduction / Warm-up).
 
         Idempotent: If turn 0 already exists, returns existing turn 0.
         """
+        t_start = time.perf_counter()
         session = await self.get_session(
             db=db, current_user=current_user, session_id=session_id
         )
@@ -387,8 +425,13 @@ class InterviewService:
         )
         turns_res = await db.execute(turns_query)
         latest_turn = turns_res.scalars().first()
+        t_db_fetch = (time.perf_counter() - t_start) * 1000
 
         if latest_turn:
+            t_total = (time.perf_counter() - t_start) * 1000
+            timings = {"db-fetch": t_db_fetch, "total": t_total}
+            if response is not None:
+                response.headers["Server-Timing"] = format_server_timing(timings)
             return latest_turn
 
         # Generate Turn 0 conversational introduction warm-up prompt respecting preferred_language
@@ -409,10 +452,30 @@ class InterviewService:
             parent_turn_id=None,
         )
 
+        if SystemDesignStageTracker.is_staged_session(session):
+            SystemDesignStageTracker.attach_stage_metadata(turn0, STAGE_0_WARMUP)
+
         session.current_turn_index = 0
+        t_commit_start = time.perf_counter()
         db.add(turn0)
         await db.commit()
         await db.refresh(turn0)
+        t_db_commit = (time.perf_counter() - t_commit_start) * 1000
+        t_total = (time.perf_counter() - t_start) * 1000
+
+        timings = {
+            "db-fetch": t_db_fetch,
+            "planning": 0.1,
+            "db-commit": t_db_commit,
+            "total": t_total,
+        }
+        if response is not None:
+            response.headers["Server-Timing"] = format_server_timing(timings)
+
+        logger.info(
+            "Interview started in %.2fms [db_fetch=%.2fms, db_commit=%.2fms] (session_id=%s)",
+            t_total, t_db_fetch, t_db_commit, session.id,
+        )
         return turn0
 
     async def get_current_turn(
@@ -445,8 +508,10 @@ class InterviewService:
         session_id: str,
         turn_id: str,
         request: TurnAnswerSubmissionRequest,
+        response: Optional[Response] = None,
     ) -> TurnAnswerSubmissionResponse:
         """Submit candidate answer for a turn, evaluate depth, and generate next turn or complete session."""
+        t_req_start = time.perf_counter()
         session = await self.get_session(
             db=db, current_user=current_user, session_id=session_id
         )
@@ -472,6 +537,8 @@ class InterviewService:
         )
         all_turns_res = await db.execute(all_turns_query)
         all_turns = list(all_turns_res.scalars().all())
+        t_db_fetch_end = time.perf_counter()
+        dur_db_fetch = (t_db_fetch_end - t_req_start) * 1000
 
         if turn.candidate_answer is not None:
             submitted_norm = _normalize_answer_text(request.candidate_answer)
@@ -485,6 +552,15 @@ class InterviewService:
 
             # Idempotent retry with identical answer: determine existing state without re-running LLM or generating turns
             turn_meta = compute_turn_metadata(session, turn, all_turns)
+            dur_total = (time.perf_counter() - t_req_start) * 1000
+            timings = {"db-fetch": dur_db_fetch, "total": dur_total}
+            if response is not None:
+                response.headers["Server-Timing"] = format_server_timing(timings)
+            logger.info(
+                "Turn answer idempotent replay in %.2fms [db_fetch=%.2fms] (session_id=%s, turn_id=%s)",
+                dur_total, dur_db_fetch, session.id, turn.id,
+            )
+
             if session.status in ("evaluating", "completed"):
                 return TurnAnswerSubmissionResponse(
                     session_id=session.id,
@@ -532,6 +608,7 @@ class InterviewService:
 
         # 2. Check if the answered turn was Turn 0 (Introduction warm-up)
         if turn.question_type == "introduction" or (turn.turn_index == 0 and turn.question_type == "introduction"):
+            t_plan_start = time.perf_counter()
             # Load resume data if attached
             resume_data = None
             if session.resume_id:
@@ -565,8 +642,11 @@ class InterviewService:
                 planned_core_questions=session.planned_core_questions,
                 current_core_index=0,
             )
+            t_plan_end = time.perf_counter()
+            dur_planning = (t_plan_end - t_plan_start) * 1000
 
             # Generate Core Question 1 via Gemini (grounded in candidate context and plan)
+            t_gemini_start = time.perf_counter()
             generated = await self.gemini_service.generate_initial_question(
                 target_role=session.target_role,
                 seniority_level=session.seniority_level,
@@ -578,6 +658,8 @@ class InterviewService:
                 candidate_context=candidate_context,
                 question_plan=q1_plan,
             )
+            t_gemini_end = time.perf_counter()
+            dur_gemini = (t_gemini_end - t_gemini_start) * 1000
 
             q_text = (generated.question_text or "").strip()
             ideal_ans = generated.ideal_answer or ""
@@ -601,25 +683,50 @@ class InterviewService:
                 parent_turn_id=None,
             )
 
+            if SystemDesignStageTracker.is_staged_session(session):
+                SystemDesignStageTracker.attach_stage_metadata(turn1, STAGE_1_REQUIREMENTS)
+
             session.current_turn_index = 1
+            t_commit_start = time.perf_counter()
             db.add(turn1)
             await db.commit()
             await db.refresh(turn1)
+            t_commit_end = time.perf_counter()
+            dur_db_commit = (t_commit_end - t_commit_start) * 1000
+
+            dur_total = (time.perf_counter() - t_req_start) * 1000
+            timings = {
+                "db-fetch": dur_db_fetch,
+                "planning": dur_planning,
+                "gemini": dur_gemini,
+                "db-commit": dur_db_commit,
+                "total": dur_total,
+            }
+            if response is not None:
+                response.headers["Server-Timing"] = format_server_timing(timings)
+
+            logger.info(
+                "Turn 0 answer processed in %.2fms [db_fetch=%.2fms, planning=%.2fms, gemini=%.2fms, db_commit=%.2fms] (session_id=%s, turn_id=%s)",
+                dur_total, dur_db_fetch, dur_planning, dur_gemini, dur_db_commit, session.id, turn.id,
+            )
 
             updated_turns = all_turns + [turn1]
+            turn1_meta = compute_turn_metadata(session, turn1, updated_turns)
             return TurnAnswerSubmissionResponse(
                 session_id=session.id,
                 current_turn_index=1,
                 session_status=session.status,
                 is_interview_complete=False,
                 answered_turn_id=turn.id,
-                current_core_question_index=0,
+                current_core_question_index=turn1_meta["core_question_index"],
                 total_core_questions=session.planned_core_questions,
-                interview_phase="core_question",
+                interview_phase=turn1_meta["interview_phase"],
                 next_turn=build_turn_response(turn1, session, updated_turns),
             )
 
         # 3. Categorize completed core and follow-up turns
+        is_staged = SystemDesignStageTracker.is_staged_session(session)
+
         core_turns = [
             t for t in all_turns
             if t.question_type == "core" or (not t.is_follow_up and t.question_type != "introduction")
@@ -633,56 +740,98 @@ class InterviewService:
         completed_followups = len(followup_turns)
         total_turns = len(all_turns)
 
-        max_followups = max(0, session.max_total_turns - session.planned_core_questions - 1)
-        remaining_core = max(0, session.planned_core_questions - completed_core)
-        remaining_followup_budget = max(0, max_followups - completed_followups)
+        if is_staged:
+            completed_staged_count = len(SystemDesignStageTracker.get_completed_staged_turns(all_turns))
+            followup_eligible = False
+            remaining_core = max(0, TOTAL_STAGED_ANSWER_TURNS - completed_staged_count)
+            remaining_followup_budget = 0
+            is_staged_done = SystemDesignStageTracker.is_staged_interview_complete(session, all_turns)
+        else:
+            completed_staged_turns = 0
+            is_staged_done = False
+            max_followups = max(0, session.max_total_turns - session.planned_core_questions - 1)
+            remaining_core = max(0, session.planned_core_questions - completed_core)
+            remaining_followup_budget = max(0, max_followups - completed_followups)
 
-        # 4. Check hard maximum total turn boundary
-        if total_turns >= session.max_total_turns:
+            # 5. Determine follow-up eligibility for the just-answered turn
+            already_has_followup = any(t.parent_turn_id == turn.id for t in followup_turns)
+            is_current_core = (turn.question_type == "core" or (not turn.is_follow_up and turn.question_type != "introduction"))
+
+            followup_eligible = (
+                is_current_core
+                and not already_has_followup
+                and remaining_followup_budget > 0
+                and total_turns < session.max_total_turns
+            )
+
+        # 4. Check hard maximum total turn boundary or staged interview completion
+        if is_staged_done or total_turns >= session.max_total_turns:
             session.status = "evaluating"
             session.completed_at = datetime.now(timezone.utc)
+            t_commit_start = time.perf_counter()
             await db.commit()
+            t_commit_end = time.perf_counter()
+            dur_db_commit = (t_commit_end - t_commit_start) * 1000
+            dur_total = (time.perf_counter() - t_req_start) * 1000
+
+            timings = {
+                "db-fetch": dur_db_fetch,
+                "db-commit": dur_db_commit,
+                "total": dur_total,
+            }
+            if response is not None:
+                response.headers["Server-Timing"] = format_server_timing(timings)
+
+            logger.info(
+                "Interview completed (max turns reached) in %.2fms [db_fetch=%.2fms, db_commit=%.2fms] (session_id=%s)",
+                dur_total, dur_db_fetch, dur_db_commit, session.id,
+            )
+
+            core_q_idx = TOTAL_STAGED_CORE_STAGES - 1 if is_staged else max(0, completed_core - 1)
             return TurnAnswerSubmissionResponse(
                 session_id=session.id,
                 current_turn_index=turn.turn_index,
                 session_status=session.status,
                 is_interview_complete=True,
                 answered_turn_id=turn.id,
-                current_core_question_index=max(0, completed_core - 1),
+                current_core_question_index=core_q_idx,
                 total_core_questions=session.planned_core_questions,
                 interview_phase="completed",
                 next_turn=None,
             )
-
-        # 5. Determine follow-up eligibility for the just-answered turn
-        # A follow-up is ONLY allowed if:
-        # - The current answered turn is a core turn (not a follow-up, and not intro)
-        # - The current core turn has not already received a follow-up
-        # - Global follow-up budget remains (> 0)
-        # - Total turns has not reached max_total_turns
-        already_has_followup = any(t.parent_turn_id == turn.id for t in followup_turns)
-        is_current_core = (turn.question_type == "core" or (not turn.is_follow_up and turn.question_type != "introduction"))
-
-        followup_eligible = (
-            is_current_core
-            and not already_has_followup
-            and remaining_followup_budget > 0
-            and total_turns < session.max_total_turns
-        )
 
         # 6. Check if any next turn is possible:
         # If no follow-up is eligible AND no core questions remain, the interview is complete!
         if not followup_eligible and remaining_core <= 0:
             session.status = "evaluating"
             session.completed_at = datetime.now(timezone.utc)
+            t_commit_start = time.perf_counter()
             await db.commit()
+            t_commit_end = time.perf_counter()
+            dur_db_commit = (t_commit_end - t_commit_start) * 1000
+            dur_total = (time.perf_counter() - t_req_start) * 1000
+
+            timings = {
+                "db-fetch": dur_db_fetch,
+                "db-commit": dur_db_commit,
+                "total": dur_total,
+            }
+            if response is not None:
+                response.headers["Server-Timing"] = format_server_timing(timings)
+
+            logger.info(
+                "Interview completed (all core questions finished) in %.2fms [db_fetch=%.2fms, db_commit=%.2fms] (session_id=%s)",
+                dur_total, dur_db_fetch, dur_db_commit, session.id,
+            )
+
+            core_q_idx = TOTAL_STAGED_CORE_STAGES - 1 if is_staged else max(0, completed_core - 1)
             return TurnAnswerSubmissionResponse(
                 session_id=session.id,
                 current_turn_index=turn.turn_index,
                 session_status=session.status,
                 is_interview_complete=True,
                 answered_turn_id=turn.id,
-                current_core_question_index=max(0, completed_core - 1),
+                current_core_question_index=core_q_idx,
                 total_core_questions=session.planned_core_questions,
                 interview_phase="completed",
                 next_turn=None,
@@ -751,6 +900,7 @@ class InterviewService:
         ]
 
         # Resolve Reference Payload and evaluate semantics of the answered turn
+        t_sem_start = time.perf_counter()
         ref_service = get_reference_evaluator_service()
         ref_payload = ref_service.resolve_reference_for_turn(
             turn=turn,
@@ -767,7 +917,10 @@ class InterviewService:
             question_text=turn.question_text,
             interview_focus=session.interview_focus,
         )
+        t_sem_end = time.perf_counter()
+        dur_semantic = (t_sem_end - t_sem_start) * 1000
 
+        t_plan_start = time.perf_counter()
         planner = get_question_planner()
         next_core_plan = planner.plan_next_question(
             context=candidate_context,
@@ -776,8 +929,11 @@ class InterviewService:
             covered_topics=covered_topics,
             previous_turns=transcript_history,
         )
+        t_plan_end = time.perf_counter()
+        dur_planning = (t_plan_end - t_plan_start) * 1000
 
         # Invoke Gemini adaptive evaluator with Candidate Context, Planner, Semantic Evidence, and authoritative state bounds
+        t_gemini_start = time.perf_counter()
         decision = await self.gemini_service.evaluate_and_generate_next_turn(
             target_role=session.target_role,
             seniority_level=session.seniority_level,
@@ -799,6 +955,8 @@ class InterviewService:
             semantic_result=sem_result,
             reference_payload=ref_payload,
         )
+        t_gemini_end = time.perf_counter()
+        dur_gemini = (t_gemini_end - t_gemini_start) * 1000
 
         # 8. Validate and enforce deterministic next-turn state
         allow_followup = followup_eligible and bool(decision.is_follow_up)
@@ -838,7 +996,28 @@ class InterviewService:
             # Core budget exhausted or missing question text -> complete interview
             session.status = "evaluating"
             session.completed_at = datetime.now(timezone.utc)
+            t_commit_start = time.perf_counter()
             await db.commit()
+            t_commit_end = time.perf_counter()
+            dur_db_commit = (t_commit_end - t_commit_start) * 1000
+            dur_total = (time.perf_counter() - t_req_start) * 1000
+
+            timings = {
+                "db-fetch": dur_db_fetch,
+                "semantic": dur_semantic,
+                "planning": dur_planning,
+                "gemini": dur_gemini,
+                "db-commit": dur_db_commit,
+                "total": dur_total,
+            }
+            if response is not None:
+                response.headers["Server-Timing"] = format_server_timing(timings)
+
+            logger.info(
+                "Interview completed in %.2fms [db_fetch=%.2fms, semantic=%.2fms, planning=%.2fms, gemini=%.2fms, db_commit=%.2fms] (session_id=%s)",
+                dur_total, dur_db_fetch, dur_semantic, dur_planning, dur_gemini, dur_db_commit, session.id,
+            )
+
             return TurnAnswerSubmissionResponse(
                 session_id=session.id,
                 current_turn_index=turn.turn_index,
@@ -863,10 +1042,35 @@ class InterviewService:
             parent_turn_id=next_parent_turn_id,
         )
 
+        if is_staged:
+            next_stage_def = SystemDesignStageTracker.resolve_next_stage(session, all_turns)
+            if next_stage_def:
+                SystemDesignStageTracker.attach_stage_metadata(next_turn, next_stage_def)
+
         session.current_turn_index = next_turn_index
+        t_commit_start = time.perf_counter()
         db.add(next_turn)
         await db.commit()
         await db.refresh(next_turn)
+        t_commit_end = time.perf_counter()
+        dur_db_commit = (t_commit_end - t_commit_start) * 1000
+
+        dur_total = (time.perf_counter() - t_req_start) * 1000
+        timings = {
+            "db-fetch": dur_db_fetch,
+            "semantic": dur_semantic,
+            "planning": dur_planning,
+            "gemini": dur_gemini,
+            "db-commit": dur_db_commit,
+            "total": dur_total,
+        }
+        if response is not None:
+            response.headers["Server-Timing"] = format_server_timing(timings)
+
+        logger.info(
+            "Turn answer processed in %.2fms [db_fetch=%.2fms, semantic=%.2fms, planning=%.2fms, gemini=%.2fms, db_commit=%.2fms] (session_id=%s, turn_id=%s)",
+            dur_total, dur_db_fetch, dur_semantic, dur_planning, dur_gemini, dur_db_commit, session.id, turn.id,
+        )
 
         updated_turns = all_turns + [next_turn]
         next_meta = compute_turn_metadata(session, next_turn, updated_turns)
