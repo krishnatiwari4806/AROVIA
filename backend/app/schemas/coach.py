@@ -5,6 +5,7 @@ from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.evaluation import SystemDesignReferenceArchitecture
 from app.schemas.progress import (
     ActionableCoachingPlanDTO,
     CandidateCurrentStateDTO,
@@ -83,6 +84,10 @@ class CoachConversationResponse(BaseModel):
     suggested_followups: List[str] = Field(default_factory=list)
     actionable_plan: Optional[ActionableCoachingPlanDTO] = None
     weakness_resolutions: List[WeaknessResolutionStateDTO] = Field(default_factory=list)
+    reference_architecture_context: Optional[SystemDesignReferenceArchitecture] = Field(
+        None,
+        description="Optional authoritative System Design Reference Architecture blueprint for this session.",
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -97,6 +102,10 @@ class CoachHistoryResponse(BaseModel):
     suggested_followups: List[str] = Field(default_factory=list)
     actionable_plan: Optional[ActionableCoachingPlanDTO] = None
     weakness_resolutions: List[WeaknessResolutionStateDTO] = Field(default_factory=list)
+    reference_architecture_context: Optional[SystemDesignReferenceArchitecture] = Field(
+        None,
+        description="Optional authoritative System Design Reference Architecture blueprint for this session.",
+    )
 
 
 class CoachChatRequest(BaseModel):
@@ -123,3 +132,7 @@ class CoachChatResponse(BaseModel):
     user_message: CoachMessageResponse
     coach_message: CoachMessageResponse
     suggested_followups: List[str] = Field(default_factory=list)
+    reference_architecture_context: Optional[SystemDesignReferenceArchitecture] = Field(
+        None,
+        description="Optional authoritative System Design Reference Architecture blueprint grounded for this conversation turn.",
+    )
