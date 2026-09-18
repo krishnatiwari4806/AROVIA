@@ -51,7 +51,7 @@ class CompetencyStage:
 UNIVERSAL_FOLLOWUPS: List[FollowUpTemplate] = [
     FollowUpTemplate(
         id="univ.probe.tradeoff.01",
-        prompt="What specific technical trade-offs did you consider with that approach, and what was the main drawback?",
+        prompt="What specific technical trade-offs did you consider with that approach, and what was its primary limitation?",
         target_probe="Technical trade-offs and decision justification",
         ideal_focus="Clear articulation of pros vs cons and rationale for the chosen pattern.",
     ),
@@ -113,7 +113,7 @@ BACKEND_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="be.jr.db.core.01",
-                    question_text="How do database transactions work, and why is the concept of ACID important when saving related records across multiple tables?",
+                    question_text="When saving related records across multiple database tables, why is the concept of ACID transactions critical for data integrity?",
                     ideal_answer="ACID ensures Atomicity (all-or-nothing), Consistency, Isolation, and Durability, preventing corrupted state during partial failures.",
                     primary_concept="Database Transactions & ACID",
                     stage_name="Database Operations",
@@ -187,7 +187,7 @@ BACKEND_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="be.mid.async.core.01",
-                    question_text="How does the asynchronous event loop work in Python or Node.js, and what happens when a synchronous blocking call is executed inside an async handler?",
+                    question_text="In an asynchronous runtime like Python or Node.js, what happens to concurrent requests when a synchronous blocking call is executed inside an async handler?",
                     ideal_answer="Async event loop executes tasks concurrently on a single thread by suspending on I/O. A synchronous blocking call blocks the entire event loop, freezing all concurrent requests.",
                     primary_concept="Asynchronous Event Loop & Concurrency",
                     stage_name="Async Processing",
@@ -211,7 +211,7 @@ BACKEND_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="be.mid.db.core.01",
-                    question_text="How do B-tree indexes speed up SQL lookups, and what causes the N+1 query problem when querying relational models with an ORM?",
+                    question_text="What causes the N+1 query problem when querying relational models with an ORM, and how do you prevent it?",
                     ideal_answer="B-trees allow O(log N) lookups by sorting index keys. N+1 queries occur when an ORM issues 1 query for parent records and N separate queries for child relationships instead of eager loading with joins/selectinload.",
                     primary_concept="Database Indexing & N+1 Prevention",
                     stage_name="Database Modeling",
@@ -235,7 +235,7 @@ BACKEND_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="be.mid.cache.core.01",
-                    question_text="Walk me through how you implement the Cache-Aside pattern with Redis, and how you manage cache invalidation when underlying records are updated.",
+                    question_text="When implementing the Cache-Aside pattern with Redis, how do you handle cache invalidation when underlying database records are updated?",
                     ideal_answer="App checks cache on read; on cache miss, reads from DB and populates cache with a TTL. On write, update DB and delete/evict cache key to prevent stale reads.",
                     primary_concept="Cache-Aside Pattern & Invalidation",
                     stage_name="Caching & Optimization",
@@ -285,7 +285,7 @@ BACKEND_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="be.sr.arch.core.01",
-                    question_text="When migrating a monolithic backend to microservices, how do you define service domain boundaries and handle distributed transactions without introducing tight synchronous coupling?",
+                    question_text="When decomposing a monolithic backend into microservices, how do you manage distributed transactions across service boundaries without tight synchronous coupling?",
                     ideal_answer="Use Domain-Driven Design (bounded contexts), adopt event-driven choreography/orchestration via message brokers, and implement the Saga pattern for eventual consistency instead of distributed 2PC locks.",
                     primary_concept="Domain Decomposition & Saga Pattern",
                     stage_name="Distributed Architecture",
@@ -333,7 +333,7 @@ BACKEND_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="be.sr.data.core.01",
-                    question_text="How do you choose a partition key when horizontally sharding an SQL database, and how do you handle cross-shard queries and replication lag in read-replicas?",
+                    question_text="When horizontally sharding a relational database, what criteria do you use to choose an effective partition key and prevent cross-shard joins?",
                     ideal_answer="Choose high-cardinality partition keys that distribute traffic evenly (e.g., tenant_id/user_id). Minimize cross-shard joins by co-locating related tables; route critical read-after-write requests to primary while handling replica lag with session tokens.",
                     primary_concept="Database Sharding & Replication Topologies",
                     stage_name="Distributed Data",
@@ -414,7 +414,7 @@ FRONTEND_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="fe.jr.dom.core.01",
-                    question_text="Could you explain how event bubbling works in the DOM and how event delegation allows handling events efficiently on dynamically created lists?",
+                    question_text="How does DOM event bubbling enable you to use event delegation efficiently on dynamically rendered lists?",
                     ideal_answer="Events propagate from the target element up through its parent hierarchy. Event delegation attaches a single listener on a parent container to catch events from all child elements using event.target.",
                     primary_concept="Event Bubbling & Event Delegation",
                     stage_name="DOM Fundamentals",
@@ -462,7 +462,7 @@ FRONTEND_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="fe.jr.css.core.01",
-                    question_text="When would you choose CSS Grid over Flexbox, and how do you ensure custom buttons and modals remain keyboard accessible?",
+                    question_text="When architecting a complex responsive web layout, how do you decide between using CSS Grid versus Flexbox?",
                     ideal_answer="Flexbox is ideal for 1D layouts (rows or columns); Grid is ideal for 2D structured layouts. Accessibility requires semantic elements (<button>), ARIA roles, focus management, and keydown listeners for Enter/Escape.",
                     primary_concept="CSS Layouts & Web Accessibility",
                     stage_name="Responsive Layouts",
@@ -536,7 +536,7 @@ FRONTEND_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="fe.mid.state.core.01",
-                    question_text="Why is server state (data fetched from APIs) conceptually different from local client state, and how do libraries like TanStack Query (React Query) manage caching and optimistic updates?",
+                    question_text="Why is asynchronous server state conceptually different from local client UI state, and how does React Query simplify caching it?",
                     ideal_answer="Server state is asynchronous, remote, and owned by other clients. TanStack Query manages background fetching, deduping requests, caching with staleTime/gcTime, and enables optimistic updates by updating client cache before network confirmation.",
                     primary_concept="Server State Caching & Optimistic UI",
                     stage_name="State Management",
@@ -610,7 +610,7 @@ FRONTEND_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="fe.sr.render.core.01",
-                    question_text="Compare Streaming Server-Side Rendering with Selective Hydration (React 18 / Next.js App Router) against traditional Client-Side Rendering in terms of Time to First Byte (TTFB) and First Input Delay.",
+                    question_text="How does Streaming Server-Side Rendering with Selective Hydration improve Time to First Byte and initial interactivity compared to traditional client-side rendering?",
                     ideal_answer="Streaming SSR streams HTML chunks with Suspense boundaries, delivering fast TTFB. Selective hydration hydrates interactive islands as they become visible or interacted with, eliminating massive blocking JS hydration passes.",
                     primary_concept="Streaming SSR & Selective Hydration",
                     stage_name="Rendering Strategies",
@@ -634,7 +634,7 @@ FRONTEND_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="fe.sr.perf.core.01",
-                    question_text="How do you build or configure a virtualized list to render 100,000 live data items at a steady 60 FPS, and how do you diagnose memory leaks caused by detached DOM nodes in Chrome DevTools?",
+                    question_text="How do you design a virtualized list in React to render 100,000 continuous data items at a consistent 60 FPS?",
                     ideal_answer="List virtualization renders only visible items in the viewport using absolute positioning and calculated offsets. Memory leaks are identified using Chrome DevTools Memory Heap Snapshots by filtering for 'Detached HTML elements' held in closure references.",
                     primary_concept="DOM Virtualization & Memory Leak Diagnostics",
                     stage_name="Performance & Memory",
@@ -741,7 +741,7 @@ FULLSTACK_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="fs.mid.optimistic.core.01",
-                    question_text="How do you implement an optimistic UI update for a 'Like' or 'Save' button in React, and how does the backend ensure atomicity and race-condition safety?",
+                    question_text="When implementing an optimistic UI update in React, how do you handle state rollbacks if the server mutation fails?",
                     ideal_answer="Frontend instantly increments count and renders active state while sending async POST; on network failure, it reverts to previous snapshot. Backend uses DB unique constraints or atomic UPDATE ... WHERE to prevent duplicate likes.",
                     primary_concept="Optimistic UI & Database Atomicity",
                     stage_name="Optimistic Persistence",
@@ -874,7 +874,7 @@ DEVOPS_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="devops.mid.k8s.core.01",
-                    question_text="What is the difference between Kubernetes Liveness and Readiness probes, and what happens if an unhandled slow startup triggers a false Liveness failure?",
+                    question_text="What is the fundamental difference between Kubernetes Liveness and Readiness probes in managing container traffic and restarts?",
                     ideal_answer="Liveness probe checks if the container needs restarting; Readiness probe checks if it is ready to receive traffic. A premature Liveness failure causes continuous restart crash-loops before the app finishes initializing.",
                     primary_concept="Kubernetes Probes & Pod Lifecycle",
                     stage_name="Kubernetes Orchestration",
@@ -898,7 +898,7 @@ DEVOPS_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="devops.mid.tf.core.01",
-                    question_text="How does Terraform manage remote state and state locking with S3 and DynamoDB, and how do you handle configuration drift when someone modifies cloud resources manually in the console?",
+                    question_text="How does Terraform utilize remote state locking with S3 and DynamoDB to prevent concurrent pipeline execution conflicts?",
                     ideal_answer="Remote state stores infrastructure mapping in S3, while DynamoDB provides mutex locks during terraform apply. Drift is detected with terraform plan/refresh, which compares real cloud state with desired state in .tf files.",
                     primary_concept="Terraform Remote State & Drift Management",
                     stage_name="Infrastructure as Code",
@@ -981,7 +981,7 @@ DATA_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="data.jr.sql.core.01",
-                    question_text="Could you explain the difference between ROW_NUMBER(), RANK(), and DENSE_RANK() in SQL, and provide an example of when you would use ROW_NUMBER() OVER (PARTITION BY ...)?",
+                    question_text="What is the practical difference in tie-handling between ROW_NUMBER(), RANK(), and DENSE_RANK() window functions in SQL?",
                     ideal_answer="ROW_NUMBER assigns unique sequential integers. RANK skips ranks on ties (1, 2, 2, 4), while DENSE_RANK does not skip (1, 2, 2, 3). PARTITION BY computes rankings independently within subsets (e.g. top 3 sales per department).",
                     primary_concept="SQL Window Functions & Partitioning",
                     stage_name="Analytical SQL",
@@ -1055,7 +1055,7 @@ DATA_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="data.mid.stream.core.01",
-                    question_text="In event streaming with Kafka and Flink/Spark Streaming, what is the difference between Event Time and Processing Time, and how do Watermarks handle late-arriving events?",
+                    question_text="In stream processing with Kafka and Flink, how do Watermarks enable accurate window aggregations over out-of-order Event Time data?",
                     ideal_answer="Event Time is when the event occurred on the producer device; Processing Time is when the stream engine receives it. Watermarks act as a progress metric in event time, defining how long the engine waits before closing a time window on late data.",
                     primary_concept="Streaming Watermarks & Event Time Semantics",
                     stage_name="Stream Processing",
@@ -1162,7 +1162,7 @@ ML_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="ml.jr.reg.core.01",
-                    question_text="How do L1 (Lasso) and L2 (Ridge) regularization prevent overfitting in linear and neural network models, and why does L1 lead to sparse feature weights?",
+                    question_text="How does L1 Lasso regularization induce sparsity in model feature weights compared to L2 Ridge regularization?",
                     ideal_answer="L2 penalizes squared weight magnitudes (shrinking weights smoothly towards zero). L1 penalizes absolute weights, driving non-informative feature weights strictly to zero due to the sharp diamond geometry of its constraint boundary.",
                     primary_concept="L1/L2 Regularization & Feature Sparsity",
                     stage_name="Regularization Techniques",
@@ -1262,7 +1262,7 @@ ML_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="ml.sr.train.core.01",
-                    question_text="How do LoRA and QLoRA enable fine-tuning a 70B parameter model on a single GPU node, and how does DeepSpeed ZeRO-3 partition model states across distributed clusters?",
+                    question_text="How do Low-Rank Adaptation (LoRA) and QLoRA reduce VRAM requirements to allow fine-tuning massive LLMs on consumer GPUs?",
                     ideal_answer="LoRA freezes pre-trained weights and injects trainable low-rank decomposition matrices (A and B). QLoRA quantizes the base model to 4-bit NormalFloat with double quantization. ZeRO-3 partitions optimizer states, gradients, and model weights across all GPUs.",
                     primary_concept="Parameter-Efficient Fine-Tuning (LoRA/QLoRA) & ZeRO-3",
                     stage_name="Distributed Training",
@@ -1552,7 +1552,7 @@ BEHAVIORAL_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="behav.sr.lead.core.01",
-                    question_text="Can you describe a high-stakes technical decision you spearheaded that impacted multiple engineering teams? How did you build consensus and guide execution?",
+                    question_text="Can you describe a high-stakes technical decision you led, and how you built consensus across multiple engineering teams?",
                     ideal_answer="Structured STAR response: Authored an RFC/design document, hosted technical reviews, addressed security/scalability concerns, defined migration phases, and mentored junior engineers throughout.",
                     primary_concept="Technical Leadership & RFC Alignment",
                     stage_name="Technical Leadership",
@@ -1609,7 +1609,7 @@ SYSTEM_DESIGN_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="sys.jr.scale.core.01",
-                    question_text="How does a Load Balancer distribute incoming traffic across multiple application servers, and why is stateless architecture critical for horizontal scaling?",
+                    question_text="Why is a stateless backend architecture critical when distributing traffic across application servers behind a Load Balancer?",
                     ideal_answer="Load balancers use algorithms like Round Robin or Least Connections to route requests. Stateless servers allow any server to handle any request because session state is stored in external caches/DBs.",
                     primary_concept="Load Balancing & Stateless Servers",
                     stage_name="Scaling Fundamentals",
@@ -1709,7 +1709,7 @@ SYSTEM_DESIGN_BANK: Dict[str, List[CompetencyStage]] = {
             core_questions=[
                 QuestionTemplate(
                     id="sys.sr.collab.core.01",
-                    question_text="Design the architecture for a real-time collaborative editor like Google Docs with millions of concurrent documents. How do you resolve simultaneous editing conflicts and scale WebSocket connections?",
+                    question_text="When architecting a real-time collaborative editor like Google Docs, how do you resolve concurrent editing conflicts between simultaneous users?",
                     ideal_answer="Maintain bidirectional WebSockets on horizontally scaled gateway servers using Redis Pub/Sub for cross-server presence. Resolve text conflicts using Conflict-Free Replicated Data Types (CRDTs like Yjs) or Operational Transformation (OT) on document coordinator nodes.",
                     primary_concept="Real-time WebSocket Scaling & Conflict Resolution (CRDTs)",
                     stage_name="Real-Time Systems",
