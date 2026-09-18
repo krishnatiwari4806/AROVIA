@@ -9,7 +9,14 @@
     "preview": "vite preview",
     "test:auth": "node tests/api_client.test.js",
     "test:coach": "node tests/coach_turn_explorer.test.js",
-    "test": "node tests/api_client.test.js && node tests/coach_turn_explorer.test.js"
+    "test:voice": "node tests/voice_stability_hardening.test.js",
+    "test:timer": "node tests/turn_timer_isolation.test.js",
+    "test:engagement": "node tests/interviewer_engagement_acceleration.test.js",
+    "test:voice-quality": "node tests/voice_quality_cadence.test.js",
+    "test:mobile": "node tests/mobile_viewport_refinement.test.js",
+    "test:voice-capability": "node tests/voice_capability_indicator.test.js",
+    "test:blueprint": "node tests/system_design_blueprint.test.js",
+    "test": "node tests/api_client.test.js && node tests/coach_turn_explorer.test.js && node tests/voice_stability_hardening.test.js && node tests/turn_timer_isolation.test.js && node tests/interviewer_engagement_acceleration.test.js && node tests/voice_quality_cadence.test.js && node tests/mobile_viewport_refinement.test.js && node tests/voice_capability_indicator.test.js && node tests/system_design_blueprint.test.js"
   },
   "dependencies": {
     "html2canvas": "^1.4.1",
