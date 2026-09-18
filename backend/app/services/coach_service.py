@@ -18,6 +18,7 @@ from app.schemas.coach import (
     CoachHistoryResponse,
     CoachMessageResponse,
 )
+from app.schemas.evaluation import SystemDesignReferenceArchitecture
 from app.schemas.progress import (
     ActionableCoachingPlanDTO,
     WeaknessResolutionStateDTO,
@@ -75,6 +76,51 @@ class CoachService:
             user_completed_sessions
         )
         return actionable_plan, weakness_resolutions
+
+    async def resolve_reference_architecture_for_session(
+        self,
+        db: AsyncSession,
+        session_id: Optional[str],
+        user_id: str,
+        context_turn_index: Optional[int] = None,
+    ) -> Optional[SystemDesignReferenceArchitecture]:
+        """Safely extract the System Design reference architecture blueprint for a session/turn."""
+        if not session_id:
+            return None
+        stmt = (
+            select(InterviewSession)
+            .where(
+                InterviewSession.id == session_id,
+                InterviewSession.user_id == user_id,
+            )
+            .options(selectinload(InterviewSession.turns))
+        )
+        res = await db.execute(stmt)
+        sess = res.scalar_one_or_none()
+        if not sess or not sess.turns:
+            return None
+
+        sorted_turns = sorted(sess.turns, key=lambda t: t.turn_index)
+        if context_turn_index is not None and 0 <= context_turn_index < len(sorted_turns):
+            turn = sorted_turns[context_turn_index]
+            eval_d = turn.evaluation_data if isinstance(turn.evaluation_data, dict) else {}
+            raw_bp = eval_d.get("architecture_blueprint")
+            if raw_bp and isinstance(raw_bp, dict):
+                try:
+                    return SystemDesignReferenceArchitecture.model_validate(raw_bp)
+                except Exception:
+                    pass
+
+        # Otherwise check from latest completed turn with architecture blueprint
+        for turn in reversed(sorted_turns):
+            eval_d = turn.evaluation_data if isinstance(turn.evaluation_data, dict) else {}
+            raw_bp = eval_d.get("architecture_blueprint")
+            if raw_bp and isinstance(raw_bp, dict):
+                try:
+                    return SystemDesignReferenceArchitecture.model_validate(raw_bp)
+                except Exception:
+                    pass
+        return None
 
     async def get_or_create_conversation(
         self,
@@ -261,6 +307,12 @@ class CoachService:
                 error_code="SESSION_NOT_FOUND",
             )
 
+        ref_arch_dto = await self.resolve_reference_architecture_for_session(
+            db=db,
+            session_id=session_id,
+            user_id=current_user.id,
+        )
+
         # Fetch conversation with messages
         stmt = (
             select(CoachConversation)
@@ -284,6 +336,7 @@ class CoachService:
                 suggested_followups=DEFAULT_INITIAL_FOLLOWUPS,
                 actionable_plan=actionable_plan,
                 weakness_resolutions=weakness_resolutions,
+                reference_architecture_context=ref_arch_dto,
             )
 
         messages_resp = [
@@ -299,6 +352,7 @@ class CoachService:
             suggested_followups=DEFAULT_INITIAL_FOLLOWUPS,
             actionable_plan=actionable_plan,
             weakness_resolutions=weakness_resolutions,
+            reference_architecture_context=ref_arch_dto,
         )
 
     async def add_message(
@@ -375,6 +429,7 @@ class CoachService:
             current_user=current_user,
             session_id=conversation.session_id,
             conversation_id=conversation.id,
+            context_turn_index=context_turn_index,
         )
 
         # 4. Generate AI Coach Response
@@ -398,10 +453,21 @@ class CoachService:
         await db.commit()
         await db.refresh(coach_msg)
 
+        # 6. Extract reference architecture if present in context
+        ref_arch_dto = None
+        if context.reference_architecture_context and isinstance(context.reference_architecture_context, dict):
+            try:
+                ref_arch_dto = SystemDesignReferenceArchitecture.model_validate(
+                    context.reference_architecture_context
+                )
+            except Exception:
+                pass
+
         return CoachChatResponse(
             user_message=CoachMessageResponse.model_validate(user_msg),
             coach_message=CoachMessageResponse.model_validate(coach_msg),
             suggested_followups=followups,
+            reference_architecture_context=ref_arch_dto,
         )
 
 
