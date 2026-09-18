@@ -3,27 +3,34 @@ import { Clock } from 'lucide-react';
 
 /**
  * Sleek Turn Timer matching Figma interview room: `03:45 / 05:00`.
+ * Owns display timer state internally to prevent parent InterviewRoom re-renders.
  */
-export function TurnTimer({ durationLimitSec = 300, onDurationTick, isPaused = false }) {
+export function TurnTimer({
+  turnId,
+  durationLimitSec = 300,
+  onDurationTick,
+  isPaused = false,
+}) {
   const [elapsed, setElapsed] = useState(0);
+  const startTimeRef = useRef(Date.now());
   const onTickRef = useRef(onDurationTick);
   onTickRef.current = onDurationTick;
 
+  // Reset timer when a new question turn begins or duration limit changes
   useEffect(() => {
+    startTimeRef.current = Date.now();
     setElapsed(0);
-  }, [durationLimitSec]);
+  }, [turnId, durationLimitSec]);
 
   useEffect(() => {
     if (isPaused) return;
 
     const interval = setInterval(() => {
-      setElapsed((prev) => {
-        const next = prev + 1;
-        if (onTickRef.current) {
-          onTickRef.current(next);
-        }
-        return next;
-      });
+      const currentElapsed = Math.round((Date.now() - startTimeRef.current) / 1000);
+      setElapsed(currentElapsed);
+      if (onTickRef.current) {
+        onTickRef.current(currentElapsed);
+      }
     }, 1000);
 
     return () => clearInterval(interval);
