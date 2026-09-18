@@ -3,7 +3,9 @@
 import asyncio
 import json
 import logging
-from typing import Any, Dict, List, Optional, Set
+import re
+import time
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from google import genai
 from google.genai import types
@@ -92,11 +94,14 @@ def _get_language_instructions(preferred_language: Optional[str]) -> str:
         )
     elif lang == "hinglish":
         return (
-            "Preferred Interview Language: Hinglish (Hindi + English Code-Switching)\n"
+            "Preferred Interview Language: Hinglish (Indian Technical Hinglish)\n"
             "Language Guidelines:\n"
-            "1. Communicate naturally in Hinglish using conversational Hindi phrasing integrated with standard English technical terminology.\n"
-            "2. Candidate may answer in mixed Hindi and English (e.g., 'Maine Redis use kiya because frequently accessed data ko cache karna tha', 'High traffic ke case mein database bottleneck ho sakta hai').\n"
-            "3. Treat code-switching and natural Hindi/English mixing as completely valid technical communication; evaluate technical concepts without penalizing language mixing."
+            "1. Formulate questions in natural Indian technical interview Hinglish.\n"
+            "2. Keep all technical nouns and technology names strictly in English (e.g. PostgreSQL, Redis, latency bottleneck, cache invalidation, API, microservices, Docker, Kafka).\n"
+            "3. Use natural Hindi conversational connectors (e.g. 'ko kaise approach kiya', 'ke liye kaunsi strategy use ki', 'kaise maintain kiya').\n"
+            "4. Prefer clean clause-level separation (e.g. 'In your PostgreSQL database, queries ko optimize karne ke liye aapne kaunsi strategy use ki?') over rapid word-by-word alternation.\n"
+            "5. Avoid overly formal Hindi, awkward literal translations, or artificial phrasing.\n"
+            "6. Candidate may respond in English, Hindi, or Hinglish; evaluate technical concepts without penalizing language mixing."
         )
     else:
         return (
@@ -161,6 +166,81 @@ def is_non_answer(answer: Optional[str]) -> bool:
     return False
 
 
+def validate_and_normalize_question(text: Optional[str]) -> Tuple[bool, str, str]:
+    """Deterministically validate and normalize an interview question for brevity and single intent.
+    
+    Rules enforced:
+    1. Non-empty, non-whitespace string.
+    2. Word count between 4 and 35 words (inclusive).
+    3. Exactly one question mark ('?'), terminating the question.
+    4. No compound interrogative clauses (e.g. 'how did you X, what was Y, and how did you Z?').
+    5. No 3+ compound topic lists (e.g. 'concurrency, error handling, and performance').
+    
+    Returns:
+        (is_valid, normalized_text, validation_reason)
+    """
+    if not text or not isinstance(text, str):
+        return False, "", "Empty question text"
+    
+    cleaned = text.strip()
+    # Remove leading/trailing quotes
+    if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
+        cleaned = cleaned[1:-1].strip()
+    
+    # Remove leading 'Interviewer:' or 'Question:' or 'Q:'
+    cleaned = re.sub(r'^(Interviewer|Question|Q):\s*', '', cleaned, flags=re.IGNORECASE).strip()
+    
+    # Normalize internal whitespace
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    
+    words = cleaned.split()
+    if len(words) < 4:
+        return False, cleaned, f"Question too short ({len(words)} words)"
+    if len(words) > 35:
+        return False, cleaned, f"Question exceeds maximum length ({len(words)} words > 35 words)"
+    
+    # Must contain exactly one question mark
+    qmark_count = cleaned.count("?")
+    if qmark_count == 0:
+        return False, cleaned, "Question is missing a question mark (?)"
+    if qmark_count > 1:
+        return False, cleaned, f"Multiple question marks detected ({qmark_count} ? marks)"
+    
+    # Must end with question mark (or question mark followed by closing quote/parenthesis)
+    if not re.search(r'\?\s*["\'\)]*$', cleaned):
+        return False, cleaned, "Question must terminate with a question mark (?)"
+        
+    # Check for compound interrogations (multiple question clauses joined by commas or conjunctions)
+    # Supports both English and Hindi/Hinglish question keywords
+    interrogative_pattern = (
+        r'\b('
+        r'how (?:did|do|can|would|should|is|are)|'
+        r'what (?:is|are|was|were|would|should|caused|causes)|'
+        r'why (?:did|do|is|are|would)|'
+        r'where (?:did|do|is|are)|'
+        r'which (?:approach|method|pattern|strategy|technique)|'
+        r'kya aap|'
+        r'kaise (?:handle|approach|manage|implement|resolve|karenge|kiya|karein)|'
+        r'kya (?:thi|tha|hoga|hogi|hai)|'
+        r'kyun (?:use|choose)'
+        r')\b'
+    )
+    matches = list(re.finditer(interrogative_pattern, cleaned, flags=re.IGNORECASE))
+    if len(matches) >= 2:
+        return False, cleaned, f"Compound question detected with {len(matches)} question intents"
+        
+    # Check for compound 3+ topic lists in a single question: e.g. 'concurrency, error handling, and performance'
+    compound_list_pattern = (
+        r'\b(concurrency|architecture|performance|latency|error handling|database|security|scaling|deployment|monitoring|caching|indexing)\s*,\s*'
+        r'(concurrency|architecture|performance|latency|error handling|database|security|scaling|deployment|monitoring|caching|indexing)\s*,\s*'
+        r'(?:and\s+)?(concurrency|architecture|performance|latency|error handling|database|security|scaling|deployment|monitoring|caching|indexing)\b'
+    )
+    if re.search(compound_list_pattern, cleaned, flags=re.IGNORECASE):
+        return False, cleaned, "Compound 3-topic question detected"
+
+    return True, cleaned, "Valid single-intent question"
+
+
 def get_grounded_fallback_question(
     context: "CandidateContext",
     plan: Optional["QuestionPlan"] = None,
@@ -180,18 +260,18 @@ def get_grounded_fallback_question(
         if intent == QuestionIntent.RESUME_PROJECT:
             if lang == "hi":
                 q_text = (
-                    f"Maine dekha ki aapne '{topic}' project par kaam kiya hai. "
-                    f"Kya aap iska system architecture aur key technical implementation explain kar sakte hain?"
+                    f"Maine dekha ki aapne '{topic}' project banaya hai. "
+                    f"Kya aap iska system architecture aur key technical decisions explain kar sakte hain?"
                 )
             elif lang == "hinglish":
                 q_text = (
-                    f"I noticed you built '{topic}'. Can you walk me through the system architecture "
-                    f"aur explain karein ki aapne key technical components kaise implement kiye?"
+                    f"I noticed you built '{topic}'. "
+                    f"Kya aap iska system architecture aur key technical decisions walk through kar sakte hain?"
                 )
             else:
                 q_text = (
-                    f"I noticed you built '{topic}'. Could you walk me through the system architecture, "
-                    f"core technical decisions, and how you structured the key components?"
+                    f"I noticed you built '{topic}'. "
+                    f"Could you walk me through the system architecture and core technical decisions?"
                 )
             return GeneratedQuestion(
                 question_text=q_text,
@@ -202,18 +282,15 @@ def get_grounded_fallback_question(
         elif intent == QuestionIntent.WORK_EXPERIENCE:
             if lang == "hi":
                 q_text = (
-                    f"{topic} mein apne experience ke dauran, aapne systems par kaam kiya. "
-                    f"Wahan aapke saamne sabse challenging technical problem kya thi aur aapka solution kya tha?"
+                    f"{topic} mein kaam karte waqt, aapne sabse challenging technical problem ko kaise resolve kiya?"
                 )
             elif lang == "hinglish":
                 q_text = (
-                    f"During your time at {topic}, what was one of the most challenging technical problems you handled, "
-                    f"aur aapne usko kaise resolve kiya?"
+                    f"During your time at {topic}, aapne sabse challenging technical problem ko kaise resolve kiya?"
                 )
             else:
                 q_text = (
-                    f"During your experience at {topic}, what was one of the most complex technical challenges "
-                    f"you encountered in production and how did you resolve it?"
+                    f"During your experience at {topic}, how did you resolve the most difficult technical challenge you encountered in production?"
                 )
             return GeneratedQuestion(
                 question_text=q_text,
@@ -224,18 +301,18 @@ def get_grounded_fallback_question(
         elif intent == QuestionIntent.JD_REQUIREMENT:
             if lang == "hi":
                 q_text = (
-                    f"Is role ke liye {topic} ek important technical requirement hai. "
-                    f"Production system mein {topic} use karte waqt aapka architecture and reliability approach kya rehta hai?"
+                    f"Is role ke liye {topic} ek zaroori requirement hai. "
+                    f"Production system mein {topic} use karte waqt aapka architecture approach kya rehta hai?"
                 )
             elif lang == "hinglish":
                 q_text = (
-                    f"This role emphasizes practical experience with {topic}. Production environment mein {topic} "
-                    f"ke sath kaam karte waqt aap concurrency and performance optimization ko kaise approach karte hain?"
+                    f"This role emphasizes practical experience with {topic}. "
+                    f"Production environment mein {topic} ke sath aap architecture and scaling ko kaise approach karte hain?"
                 )
             else:
                 q_text = (
                     f"This {context.target_role} role emphasizes strong practical capability with {topic}. "
-                    f"How do you approach designing, optimizing, and debugging systems using {topic} in production?"
+                    f"How do you approach designing and scaling systems using {topic} in production?"
                 )
             return GeneratedQuestion(
                 question_text=q_text,
@@ -246,16 +323,16 @@ def get_grounded_fallback_question(
         elif intent == QuestionIntent.CORE_SKILL and context.has_resume:
             if lang == "hi":
                 q_text = (
-                    f"{topic} ke saath kaam karte waqt, aap concurrency, error handling aur performance optimization ko kaise manage karte hain?"
+                    f"{topic} ke saath kaam karte waqt, aap concurrency aur race conditions ko kaise manage karte hain?"
                 )
             elif lang == "hinglish":
                 q_text = (
-                    f"Given your background in {topic}, aap concurrency, error handling aur performance optimization ko kaise handle karte hain?"
+                    f"Given your background in {topic}, aap concurrency aur race conditions ko kaise handle karte hain?"
                 )
             else:
                 q_text = (
-                    f"Given your background with {topic}, how do you approach concurrency, error handling, "
-                    f"and performance optimization when designing scalable services?"
+                    f"Given your background with {topic}, how do you handle concurrency and race conditions "
+                    f"when designing scalable services?"
                 )
             return GeneratedQuestion(
                 question_text=q_text,
@@ -291,18 +368,15 @@ def get_semantic_gap_fallback_followup(
 
     if lang == "hi":
         q_text = (
-            f"Aapne jo explain kiya uske aage, is architecture mein aap '{clean_missing}' ke implementation "
-            f"aur trade-offs ko kaise handle karenge?"
+            f"Aapne jo explain kiya uske aage, is architecture mein aap '{clean_missing}' ko kaise implement karenge?"
         )
     elif lang == "hinglish":
         q_text = (
-            f"Building on what you just explained, is architecture mein aap '{clean_missing}' ke implementation "
-            f"aur trade-offs ko kaise approach karenge?"
+            f"Building on what you just explained, is architecture mein aap '{clean_missing}' ko kaise approach karenge?"
         )
     else:
         q_text = (
-            f"Building on what you just shared, could you explain how you would approach '{clean_missing}' "
-            f"and its operational trade-offs in that architecture?"
+            f"Building on what you just shared, could you explain how you would approach '{clean_missing}' in that architecture?"
         )
 
     return GeneratedQuestion(
@@ -333,13 +407,24 @@ Generate the first core technical interview question (Core Question 1, following
 ### LANGUAGE GUIDELINES
 {language_instructions}
 
-### QUESTION QUALITY & ANTI-HALLUCINATION RULES
+### QUESTION QUALITY, BREVITY & ANTI-HALLUCINATION RULES
 1. STRICT ANTI-HALLUCINATION RULE: ONLY reference projects, companies, technologies, or achievements that are EXPLICITLY listed in the Candidate Context or Job Description above. NEVER fabricate or assume candidate projects, employers, metrics, or technologies.
-2. If the planned intent is `resume_project`, formulate a natural, realistic question about that specific project and its technical mechanics.
-3. If the candidate has no uploaded resume, ask a solid fundamental question targeting the role ({target_role}) and seniority ({seniority_level}).
-4. Formulate ONE clear, conversational interview question in `question_text`.
-5. Provide a comprehensive benchmark ideal answer in `ideal_answer` reflecting senior expectations.
-6. Specify the evaluated technical concept in `primary_concept`.
+2. STRICT WORD COUNT LIMIT (20–35 WORDS MAXIMUM): `question_text` MUST be between 20 and 35 words. Be punchy, focused, and conversational.
+3. SINGLE CONVERSATIONAL INTENT:
+   - Exactly ONE primary question.
+   - Exactly ONE question mark ('?').
+   - ZERO compound questions (do NOT combine 2 or 3 inquiries like "What was X, how did you Y, and how did you verify Z?").
+   - ZERO multiple independent requests.
+   - Prefer depth on ONE targeted concept over asking three shallow concepts at once.
+4. NATURAL CONVERSATIONAL TONE:
+   - Ask naturally as a human interviewer speaking aloud in a real technical interview.
+   - No unnecessary filler or preamble (do NOT start with "That's great! Let's now move on to...").
+   - No benchmark answers, hints, or explanations embedded inside the question.
+5. If the planned intent is `resume_project`, formulate a natural, realistic question about that specific project and its technical mechanics.
+6. If the candidate has no uploaded resume, ask a solid fundamental question targeting the role ({target_role}) and seniority ({seniority_level}).
+7. Formulate ONE clear, conversational interview question in `question_text`.
+8. Provide a concise 1-2 sentence senior benchmark response in `ideal_answer` (20–40 words) focusing on core technical mechanisms and trade-offs.
+9. Specify the evaluated technical concept in `primary_concept`.
 """
 
 ADAPTIVE_NEXT_TURN_PROMPT_TEMPLATE = """You are an expert technical interviewer for the AROVIA mock interview platform conducting an adaptive technical interview.
@@ -394,10 +479,17 @@ Candidate Latest Answer:
 4. ADVANCING TO NEXT CORE QUESTION: If `is_follow_up=False` and `remaining_core_questions` > 0:
    - Generate the next core question based on the Planned Next Core Intent ({planned_next_intent}) and Topic ({planned_next_topic}).
    - Ground the question strictly in the provided Candidate Context or Job Description without hallucinating facts.
-5. CONVERSATIONAL TRANSITION: Include a brief, natural conversational transition phrase connecting the previous discussion to the next inquiry without repeating candidate words word-for-word.
-6. INTERVIEW COMPLETION: If `remaining_core_questions` <= 0 and no follow-up is warranted:
+5. STRICT QUESTION BREVITY & SINGLE INTENT (20–35 WORDS MAXIMUM):
+   - `question_text` MUST be between 20 and 35 words.
+   - Exactly ONE primary question with exactly ONE question mark ('?').
+   - ZERO compound questions (do NOT combine multiple inquiries or ask 2-3 questions in one turn).
+   - ZERO multiple independent requests. Focus deeply on ONE concept.
+   - No filler preamble. No answers or hints inside the question.
+6. CONVERSATIONAL TRANSITION: If advancing to a new core question, include a brief, natural transition without repeating candidate words verbatim.
+7. INTERVIEW COMPLETION: If `remaining_core_questions` <= 0 and no follow-up is warranted:
    - Set `is_interview_complete=True`, `is_follow_up=False`, and leave question_text null.
-7. AVOID DUPLICATION: Never repeat questions or topics already discussed in previous turns.
+8. AVOID DUPLICATION: Never repeat questions or topics already discussed in previous turns.
+9. CONCISE BENCHMARK ANSWER: If generating a question, provide a concise 1-2 sentence senior benchmark response in `ideal_answer` (20–40 words) focusing directly on core technical mechanisms and trade-offs. Avoid verbose multi-paragraph essays.
 """
 
 SESSION_EVALUATION_PROMPT_TEMPLATE = """You are the Chief Technical Interview Evaluator for the AROVIA platform.
@@ -885,10 +977,12 @@ class GeminiService:
             response_mime_type="application/json",
             response_schema=GeneratedQuestion,
             temperature=0.3,
+            max_output_tokens=600,
         )
 
         max_attempts = 2
         last_exception: Optional[Exception] = None
+        t_call_start = time.perf_counter()
 
         for attempt in range(1, max_attempts + 1):
             try:
@@ -900,7 +994,32 @@ class GeminiService:
                 if response.text:
                     parsed = GeneratedQuestion.model_validate_json(response.text)
                     if parsed.question_text and parsed.question_text.strip():
-                        return parsed
+                        is_valid, norm_text, reason = validate_and_normalize_question(parsed.question_text)
+                        if is_valid:
+                            parsed.question_text = norm_text
+                            dur_ms = (time.perf_counter() - t_call_start) * 1000
+                            logger.info(
+                                "Gemini initial question generated in %.2fms [model=%s, attempts=%d, fallback=False]",
+                                dur_ms, self.model, attempt,
+                            )
+                            return parsed
+                        else:
+                            logger.warning(
+                                f"Gemini initial question failed single-intent/brevity validation ({reason}): "
+                                f"'{parsed.question_text}'. Using grounded deterministic fallback."
+                            )
+                            dur_ms = (time.perf_counter() - t_call_start) * 1000
+                            logger.info(
+                                "Gemini initial question fallback triggered in %.2fms [model=%s, attempts=%d, fallback=True, reason=validation]",
+                                dur_ms, self.model, attempt,
+                            )
+                            return get_grounded_fallback_question(
+                                context=candidate_context,
+                                plan=question_plan,
+                                language=preferred_language or "en",
+                                stage_index=0,
+                                excluded_question_ids=excluded_question_ids,
+                            )
             except Exception as exc:
                 is_transient = _is_transient_gemini_error(exc)
                 logger.warning(
@@ -915,8 +1034,9 @@ class GeminiService:
             if attempt < max_attempts:
                 await asyncio.sleep(1.0)
 
+        dur_ms = (time.perf_counter() - t_call_start) * 1000
         logger.warning(
-            f"Initial question generation failed after attempt(s): {_sanitize_log_message(last_exception, self.api_key)}. Using grounded fallback."
+            f"Initial question generation failed after attempt(s) in {dur_ms:.2f}ms: {_sanitize_log_message(last_exception, self.api_key)}. Using grounded fallback."
         )
         return get_grounded_fallback_question(
             context=candidate_context,
@@ -1099,12 +1219,14 @@ class GeminiService:
         cand_summary = candidate_context.format_candidate_summary()
         jd_summary = candidate_context.format_jd_summary()
 
+        # Format prior turns (excluding the latest turn which is passed explicitly below)
+        prior_turns = transcript_history[:-1][-3:] if len(transcript_history) > 1 else []
         history_str = "\n".join(
             [
                 f"Turn {t.get('turn_index')}: [Q: {t.get('question_text')}] -> [A: {t.get('candidate_answer')}]"
-                for t in transcript_history[-4:]
+                for t in prior_turns
             ]
-        ) or "None (Turn 0 completed)"
+        ) or "None (prior turns completed)"
 
         planned_intent_str = question_plan.intent.value if question_plan else "core_progression"
         planned_topic_str = question_plan.topic if question_plan else "Core Engineering Competency"
@@ -1139,10 +1261,12 @@ class GeminiService:
             response_mime_type="application/json",
             response_schema=NextTurnDecision,
             temperature=0.3,
+            max_output_tokens=600,
         )
 
         max_attempts = 2
         last_exception: Optional[Exception] = None
+        t_call_start = time.perf_counter()
 
         for attempt in range(1, max_attempts + 1):
             try:
@@ -1167,9 +1291,10 @@ class GeminiService:
                         parsed.is_follow_up = False
 
                     if parsed.is_interview_complete:
+                        dur_ms = (time.perf_counter() - t_call_start) * 1000
                         if remaining_core_questions > 0:
                             logger.warning(
-                                f"Gemini returned premature completion with {remaining_core_questions} core questions remaining. Overriding with grounded fallback."
+                                f"Gemini returned premature completion with {remaining_core_questions} core questions remaining in {dur_ms:.2f}ms. Overriding with grounded fallback."
                             )
                             fallback_core = get_grounded_fallback_question(
                                 context=candidate_context,
@@ -1186,9 +1311,66 @@ class GeminiService:
                                 primary_concept=fallback_core.primary_concept,
                                 is_interview_complete=False,
                             )
+                        logger.info(
+                            "Gemini next turn completion decided in %.2fms [model=%s, attempts=%d, fallback=False]",
+                            dur_ms, self.model, attempt,
+                        )
                         return parsed
                     elif parsed.question_text and parsed.question_text.strip():
-                        return parsed
+                        is_valid, norm_text, reason = validate_and_normalize_question(parsed.question_text)
+                        dur_ms = (time.perf_counter() - t_call_start) * 1000
+                        if is_valid:
+                            parsed.question_text = norm_text
+                            logger.info(
+                                "Gemini next turn decision generated in %.2fms [model=%s, attempts=%d, is_follow_up=%s, fallback=False]",
+                                dur_ms, self.model, attempt, parsed.is_follow_up,
+                            )
+                            return parsed
+                        else:
+                            logger.warning(
+                                f"Gemini next turn question failed single-intent/brevity validation ({reason}): "
+                                f"'{parsed.question_text}'. Using grounded fallback."
+                            )
+                            logger.info(
+                                "Gemini next turn fallback triggered in %.2fms [model=%s, attempts=%d, fallback=True, reason=validation]",
+                                dur_ms, self.model, attempt,
+                            )
+                            if (
+                                parsed.is_follow_up
+                                and followup_allowed
+                                and target_missing_concept != "None (All key concepts demonstrated)"
+                            ):
+                                followup_probe = get_semantic_gap_fallback_followup(
+                                    role=target_role,
+                                    seniority=seniority_level,
+                                    parent_concept=previous_question,
+                                    target_missing_concept=target_missing_concept,
+                                    language=preferred_language or "en",
+                                )
+                                return NextTurnDecision(
+                                    is_follow_up=True,
+                                    is_interview_complete=False,
+                                    follow_up_reasoning=f"Candidate omitted '{target_missing_concept}'; probing missing domain concept directly.",
+                                    question_text=followup_probe.question_text,
+                                    ideal_answer=followup_probe.ideal_answer,
+                                    primary_concept=followup_probe.primary_concept,
+                                )
+                            else:
+                                fallback_core = get_grounded_fallback_question(
+                                    context=candidate_context,
+                                    plan=question_plan,
+                                    language=preferred_language or "en",
+                                    stage_index=completed_core_turns,
+                                    excluded_question_ids=excluded_question_ids,
+                                )
+                                return NextTurnDecision(
+                                    is_follow_up=False,
+                                    is_interview_complete=False,
+                                    follow_up_reasoning=f"Advancing to core question on {planned_topic_str}.",
+                                    question_text=fallback_core.question_text,
+                                    ideal_answer=fallback_core.ideal_answer,
+                                    primary_concept=fallback_core.primary_concept,
+                                )
             except Exception as exc:
                 is_transient = _is_transient_gemini_error(exc)
                 logger.warning(
@@ -1203,8 +1385,9 @@ class GeminiService:
             if attempt < max_attempts:
                 await asyncio.sleep(1.0)
 
+        dur_ms = (time.perf_counter() - t_call_start) * 1000
         logger.warning(
-            f"Adaptive next turn generation failed after attempt(s): {_sanitize_log_message(last_exception, self.api_key)}. Using grounded fallback decision."
+            f"Adaptive next turn generation failed after attempt(s) in {dur_ms:.2f}ms: {_sanitize_log_message(last_exception, self.api_key)}. Using grounded fallback decision."
         )
 
         # 1. If all core questions are completed and no follow-up is warranted, end session cleanly
