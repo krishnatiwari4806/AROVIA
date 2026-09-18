@@ -1175,6 +1175,56 @@ html, body {
   justify-content: space-between;
 }
 
+.language-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xs);
+  flex-wrap: wrap;
+}
+
+.voice-capability-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.02em;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.voice-capability-badge .voice-badge-icon {
+  flex-shrink: 0;
+}
+
+.voice-capability-badge.available {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  color: #34D399;
+}
+
+.voice-capability-badge.fallback {
+  background: rgba(91, 140, 255, 0.08);
+  border: 1px solid rgba(91, 140, 255, 0.2);
+  color: #93C5FD;
+}
+
+.voice-capability-badge.unavailable {
+  background: rgba(107, 114, 128, 0.15);
+  border: 1px solid rgba(107, 114, 128, 0.3);
+  color: var(--text-muted);
+}
+
+.voice-capability-subtext {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
 .char-counter {
   font-size: 11px;
   color: var(--text-muted);
@@ -1642,6 +1692,21 @@ html, body {
   animation: wave-bar-dance 0.8s ease-in-out infinite alternate;
 }
 
+.arovia-waveform-container.analyzing .waveform-bar {
+  opacity: 0.85;
+  background: linear-gradient(180deg, #22d3ee, #818cf8);
+  animation: wave-bar-analyzing 1.2s ease-in-out infinite alternate;
+}
+
+.arovia-crystal-core-wrapper.analyzing .crystal-ambient-spotlight {
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.22) 0%, rgba(34, 211, 238, 0.16) 50%, transparent 70%);
+  animation: crystal-analyzing-glow 2.2s ease-in-out infinite alternate;
+}
+
+.arovia-crystal-core-wrapper.analyzing .crystal-svg-object {
+  filter: drop-shadow(0 0 16px rgba(56, 189, 248, 0.35));
+}
+
 /* AI Question Prompt Card */
 .ai-question-card {
   width: 100%;
@@ -1650,6 +1715,12 @@ html, body {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-xl);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.ai-question-card.analyzing {
+  border-color: rgba(56, 189, 248, 0.3);
+  box-shadow: 0 0 24px rgba(34, 211, 238, 0.08);
 }
 
 .question-card-header {
@@ -1666,6 +1737,12 @@ html, body {
   font-size: 11px;
   font-weight: var(--weight-bold);
   color: var(--text-muted);
+  transition: color 0.3s ease;
+}
+
+.ai-asking-badge.analyzing {
+  color: #38bdf8;
+  letter-spacing: 0.04em;
 }
 
 .question-tag-pills {
@@ -1912,6 +1989,333 @@ html, body {
   font-size: var(--text-xs);
   font-weight: var(--weight-bold);
   cursor: pointer;
+}
+
+/* ==========================================================================
+   Interview Room Responsive Layout Hardening (Tablet <= 900px, Mobile <= 768px, Compact <= 480px, Ultra-compact <= 360px)
+   ========================================================================== */
+
+@media (max-width: 900px) {
+  .room-stage-grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-md);
+  }
+
+  .room-center-stage {
+    padding: var(--space-lg);
+  }
+
+  .ai-question-card {
+    max-width: 100%;
+  }
+
+  .room-right-stage {
+    width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .arovia-interview-room-layout {
+    gap: var(--space-sm);
+    min-height: auto;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .room-top-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+  }
+
+  .header-meta-group {
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+  }
+
+  .role-title-text {
+    font-size: var(--text-sm);
+  }
+
+  .turn-progress-tracker {
+    width: 100%;
+  }
+
+  .room-stage-grid {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    width: 100%;
+  }
+
+  .room-center-stage {
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    width: 100%;
+  }
+
+  .crystal-stage-container {
+    margin-bottom: var(--space-sm);
+  }
+
+  .crystal-svg-object {
+    width: 80px;
+    height: 80px;
+  }
+
+  .crystal-ambient-spotlight {
+    width: 110px;
+    height: 110px;
+    filter: blur(14px);
+  }
+
+  .arovia-waveform-container {
+    height: 16px;
+    margin-top: 6px;
+  }
+
+  .waveform-bar {
+    width: 2.5px;
+    height: 5px;
+  }
+
+  .ai-question-card {
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    width: 100%;
+  }
+
+  .question-prompt-text {
+    font-size: var(--text-base);
+    line-height: 1.5;
+    margin-bottom: var(--space-sm);
+  }
+
+  .room-timer-row {
+    margin-top: var(--space-sm);
+  }
+
+  .live-transcription-card {
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+  }
+
+  .transcription-textarea {
+    min-height: 120px;
+    padding: var(--space-sm);
+    font-size: var(--text-sm);
+  }
+
+  .room-controls-card {
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    gap: var(--space-md);
+  }
+
+  .square-mic-btn {
+    width: 56px;
+    height: 56px;
+  }
+}
+
+@media (max-width: 480px) {
+  .room-top-header {
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+  }
+
+  .live-status-pill {
+    padding: 2px 6px;
+    gap: 4px;
+  }
+
+  .live-status-label {
+    font-size: 10px;
+  }
+
+  .role-title-text {
+    font-size: 13px;
+    line-height: 1.3;
+  }
+
+  .meta-pill {
+    font-size: 9px;
+    padding: 1px 6px;
+  }
+
+  .tracker-text {
+    font-size: 10px;
+  }
+
+  .tracker-bar-track {
+    height: 3px;
+  }
+
+  .room-center-stage {
+    padding: 10px 12px;
+  }
+
+  /* Compact 3D CrystalCore for < 480px to give question first priority */
+  .crystal-stage-container {
+    margin-bottom: 4px;
+  }
+
+  .crystal-svg-object {
+    width: 56px;
+    height: 56px;
+  }
+
+  .crystal-ambient-spotlight {
+    width: 76px;
+    height: 76px;
+    filter: blur(10px);
+  }
+
+  .arovia-waveform-container {
+    height: 12px;
+    margin-top: 4px;
+    gap: 3px;
+  }
+
+  .waveform-bar {
+    width: 2px;
+    height: 4px;
+  }
+
+  .ai-question-card {
+    padding: 12px 12px;
+  }
+
+  .question-card-header {
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+
+  .ai-asking-badge {
+    font-size: 10px;
+    gap: 4px;
+  }
+
+  .question-tag-pills {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .tag-pill {
+    font-size: 9px;
+    padding: 1px 6px;
+  }
+
+  .question-prompt-text {
+    font-size: 14px;
+    line-height: 1.45;
+    margin-bottom: 8px;
+    word-break: break-word;
+  }
+
+  .audio-replay-btn {
+    padding: 3px 8px;
+    font-size: 11px;
+    gap: 4px;
+  }
+
+  .room-timer-row {
+    margin-top: 6px;
+  }
+
+  .arovia-turn-timer {
+    padding: 3px 10px;
+    font-size: 12px;
+    gap: 4px;
+  }
+
+  /* Transcription and Answer Area */
+  .live-transcription-card {
+    padding: 10px 12px;
+  }
+
+  .transcription-header {
+    margin-bottom: 6px;
+  }
+
+  .transcription-title {
+    font-size: 10px;
+  }
+
+  .transcription-textarea {
+    min-height: 96px;
+    padding: 8px 10px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .transcription-meta-footer {
+    font-size: 10px;
+  }
+
+  /* Compact controls on <= 480px */
+  .room-controls-card {
+    padding: 10px 12px;
+    gap: 10px;
+  }
+
+  .mic-square-control {
+    gap: 4px;
+  }
+
+  .square-mic-btn {
+    width: 48px;
+    height: 48px;
+  }
+
+  .mic-status-label {
+    font-size: 10px;
+  }
+
+  .dual-action-buttons-row {
+    gap: 6px;
+  }
+
+  .end-interview-btn,
+  .submit-turn-btn {
+    padding: 9px 8px;
+    font-size: 11px;
+    min-height: 40px;
+  }
+}
+
+@media (max-width: 360px) {
+  .role-tags-group {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  .crystal-svg-object {
+    width: 44px;
+    height: 44px;
+  }
+
+  .crystal-ambient-spotlight {
+    width: 60px;
+    height: 60px;
+  }
+
+  .question-prompt-text {
+    font-size: 13px;
+  }
+
+  .transcription-textarea {
+    min-height: 80px;
+    font-size: 12px;
+  }
+
+  .end-interview-btn span,
+  .submit-turn-btn span {
+    font-size: 10px;
+  }
 }
 
 /* ==========================================================================
@@ -2418,6 +2822,436 @@ html, body {
   font-size: 11px;
   color: var(--text-muted);
   margin-top: var(--space-xs);
+}
+
+/* ==========================================================================
+   SYSTEM DESIGN REFERENCE ARCHITECTURE BLUEPRINT & VISUAL GAP REPORT
+   ========================================================================== */
+.system-design-blueprint-card {
+  background: linear-gradient(180deg, rgba(20, 24, 38, 0.7) 0%, rgba(12, 15, 25, 0.85) 100%);
+  border: 1px solid rgba(91, 140, 255, 0.22);
+  border-radius: var(--radius-md);
+  padding: var(--space-md) var(--space-lg);
+  margin: var(--space-sm) 0;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.blueprint-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.blueprint-header-title-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.blueprint-icon-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: rgba(91, 140, 255, 0.12);
+  border: 1px solid rgba(91, 140, 255, 0.28);
+  color: var(--accent-cyan);
+  flex-shrink: 0;
+}
+
+.blueprint-category-tag {
+  font-size: 9px;
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-cyan);
+}
+
+.blueprint-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.blueprint-mode-badge {
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  color: #a5b4fc;
+  white-space: nowrap;
+}
+
+.blueprint-summary-text {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 2px 0 6px 0;
+}
+
+/* Topology Section & Canvas */
+.blueprint-topology-section {
+  background: rgba(8, 10, 16, 0.65);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-2xs);
+}
+
+.topology-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  margin-bottom: var(--space-xs);
+}
+
+.topology-section-label {
+  font-weight: var(--weight-bold);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.topology-node-count {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.blueprint-canvas-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 2px;
+}
+
+.blueprint-node-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-xs);
+  margin-bottom: var(--space-xs);
+}
+
+.architecture-node-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: border-color 0.2s ease, transform 0.15s ease;
+}
+
+.architecture-node-card:hover {
+  border-color: rgba(91, 140, 255, 0.4);
+}
+
+.architecture-node-card.node-type-client { border-left: 3px solid #38bdf8; }
+.architecture-node-card.node-type-gateway { border-left: 3px solid #818cf8; }
+.architecture-node-card.node-type-service { border-left: 3px solid #34d399; }
+.architecture-node-card.node-type-cache { border-left: 3px solid #fbbf24; }
+.architecture-node-card.node-type-database { border-left: 3px solid #f472b6; }
+.architecture-node-card.node-type-queue { border-left: 3px solid #c084fc; }
+.architecture-node-card.node-type-external { border-left: 3px solid #94a3b8; }
+
+.node-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.node-type-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.node-icon-client { color: #38bdf8; }
+.node-icon-gateway { color: #818cf8; }
+.node-icon-service { color: #34d399; }
+.node-icon-cache { color: #fbbf24; }
+.node-icon-database { color: #f472b6; }
+.node-icon-queue { color: #c084fc; }
+.node-icon-external { color: #94a3b8; }
+
+.node-type-label {
+  font-size: 9px;
+  font-weight: var(--weight-bold);
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+}
+
+.node-core-badge {
+  font-size: 8px;
+  font-weight: var(--weight-bold);
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.node-label {
+  font-size: 11px;
+  font-weight: var(--weight-bold);
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.node-purpose {
+  font-size: 10px;
+  color: var(--text-secondary);
+  line-height: 1.35;
+  margin: 0;
+}
+
+/* Directed Edges Flow List */
+.blueprint-edges-flow {
+  background: rgba(14, 18, 28, 0.5);
+  border: 1px dashed rgba(91, 140, 255, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+
+.edges-flow-title {
+  display: block;
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.edges-flow-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.edge-flow-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  flex-wrap: wrap;
+  line-height: 1.4;
+}
+
+.edge-src-label, .edge-tgt-label {
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+
+.edge-arrow-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-secondary);
+}
+
+.edge-action-label {
+  color: var(--text-secondary);
+}
+
+.edge-protocol {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--accent-cyan);
+  background: rgba(56, 189, 248, 0.08);
+  padding: 0 3px;
+  border-radius: 2px;
+}
+
+.edge-mode-tag {
+  font-size: 8px;
+  font-weight: var(--weight-bold);
+  text-transform: uppercase;
+  padding: 1px 4px;
+  border-radius: 2px;
+  margin-left: auto;
+}
+
+.edge-mode-tag.tag-sync {
+  background: rgba(59, 130, 246, 0.1);
+  color: #60a5fa;
+}
+
+.edge-mode-tag.tag-async {
+  background: rgba(168, 85, 247, 0.1);
+  color: #c084fc;
+}
+
+/* Concept Alignment Overlay */
+.blueprint-concept-alignment {
+  margin: var(--space-xs) 0;
+  padding: 8px 10px;
+  background: rgba(12, 16, 26, 0.6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.alignment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  margin-bottom: 6px;
+}
+
+.alignment-label {
+  font-weight: var(--weight-bold);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.alignment-note {
+  color: var(--accent-cyan);
+  font-size: 9px;
+  font-weight: var(--weight-semibold);
+}
+
+.alignment-tags-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.alignment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  line-height: 1.3;
+}
+
+.alignment-chip.demonstrated {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  color: #34d399;
+}
+
+.alignment-chip.consideration {
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  color: #a5b4fc;
+}
+
+.chip-status-tag {
+  font-size: 8px;
+  opacity: 0.85;
+  font-weight: var(--weight-semibold);
+  margin-left: 2px;
+}
+
+/* Senior Architectural Deep Dive Tabs */
+.blueprint-deep-dive-section {
+  margin-top: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.deep-dive-tab-bar {
+  display: flex;
+  gap: 2px;
+  background: rgba(10, 12, 18, 0.7);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.deep-dive-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  padding: 5px 10px;
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.deep-dive-tab-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.deep-dive-tab-btn.is-active {
+  color: var(--accent-cyan);
+  border-bottom-color: var(--accent-cyan);
+  background: rgba(56, 189, 248, 0.05);
+}
+
+.deep-dive-content-pane {
+  padding: 8px 10px;
+  background: rgba(14, 17, 26, 0.4);
+}
+
+.deep-dive-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.deep-dive-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.item-bullet {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.tradeoff-item .item-bullet { background: #fbbf24; }
+.resilience-item .item-bullet { background: #f87171; }
+.scaling-item .item-bullet { background: #34d399; }
+
+.item-text {
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.deep-dive-empty {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+@media (max-width: 480px) {
+  .blueprint-node-grid {
+    grid-template-columns: 1fr;
+  }
+  .edge-flow-item {
+    font-size: 9px;
+  }
+  .deep-dive-tab-btn {
+    font-size: 9px;
+    padding: 4px 6px;
+  }
 }
 
 /* Footer Actions */
@@ -3512,9 +4346,20 @@ html.larger-text {
   50% { transform: translateY(-5px); }
 }
 
+@keyframes crystal-analyzing-glow {
+  0% { transform: scale(0.95); opacity: 0.6; filter: blur(18px); }
+  100% { transform: scale(1.18); opacity: 1; filter: blur(24px); }
+}
+
 @keyframes wave-bar-dance {
   0% { height: 4px; }
   100% { height: 18px; }
+}
+
+@keyframes wave-bar-analyzing {
+  0% { height: 4px; opacity: 0.4; }
+  50% { height: 14px; opacity: 0.95; }
+  100% { height: 6px; opacity: 0.5; }
 }
 
 @keyframes logo-reveal-scale {
@@ -5926,6 +6771,60 @@ html.larger-text {
     padding: 14px 14px;
   }
 }
+
+/* Coach Reference Architecture Grounding Badges & Controls (Task 10.8) */
+.msg-grounding-tags-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.turn-blueprint-grounded-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm, 4px);
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  color: #93C5FD;
+  font-size: 10px;
+  font-weight: var(--weight-bold, 700);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.turn-blueprint-indicator-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm, 4px);
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  color: #C4B5FD;
+  font-size: 10px;
+  font-weight: var(--weight-semibold, 600);
+  flex-shrink: 0;
+}
+
+.turn-prompt-action.blueprint-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: #93C5FD;
+}
+
+.turn-prompt-action.blueprint-action-btn:hover {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: rgba(59, 130, 246, 0.5);
+  color: #FFFFFF;
+}
+
 
 
 
