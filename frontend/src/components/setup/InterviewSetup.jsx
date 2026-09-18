@@ -11,9 +11,11 @@ import {
   Sliders,
   Sparkles,
   RotateCcw,
+  Volume2,
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { getAroviaSettings } from '../../services/settingsManager';
+import { resolveVoiceCapability } from '../../hooks/useSpeechSynthesis';
 
 /**
  * Interview Setup & Configuration Screen.
@@ -96,8 +98,43 @@ export function InterviewSetup({ practiceIntent = null, onStartInterview, onBack
   const [isUploadingResume, setIsUploadingResume] = useState(false);
   const [creatingSession, setCreatingSession] = useState(false);
   const [error, setError] = useState(null);
+  const [voices, setVoices] = useState([]);
+  const [isSynthSupported, setIsSynthSupported] = useState(true);
 
   const fileInputRef = useRef(null);
+
+  // Browser speech synthesis capability listener (passive, ₹0, no hidden speech, no mic access)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      setIsSynthSupported(false);
+      return;
+    }
+
+    setIsSynthSupported(true);
+    const updateVoices = () => {
+      try {
+        const vList = window.speechSynthesis.getVoices() || [];
+        setVoices(vList);
+      } catch {
+        // ignore
+      }
+    };
+
+    updateVoices();
+    if (window.speechSynthesis.onvoiceschanged !== undefined) {
+      window.speechSynthesis.onvoiceschanged = updateVoices;
+    }
+
+    return () => {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        if (window.speechSynthesis.onvoiceschanged === updateVoices) {
+          window.speechSynthesis.onvoiceschanged = null;
+        }
+      }
+    };
+  }, []);
+
+  const voiceCapability = resolveVoiceCapability(voices, isSynthSupported, preferredLanguage);
 
   const seniorityOptions = [
     { id: 'Junior', label: 'Junior' },
@@ -337,7 +374,19 @@ export function InterviewSetup({ practiceIntent = null, onStartInterview, onBack
             </div>
 
             <div className="card-section">
-              <label className="field-label">PREFERRED INTERVIEW LANGUAGE</label>
+              <div className="language-section-header">
+                <label className="field-label">PREFERRED INTERVIEW LANGUAGE</label>
+                <div
+                  className={`voice-capability-badge ${voiceCapability.type}`}
+                  data-testid="voice-capability-badge"
+                  title={voiceCapability.detail}
+                  aria-label={voiceCapability.label}
+                  role="status"
+                >
+                  <Volume2 size={12} className="voice-badge-icon" />
+                  <span className="voice-badge-text">{voiceCapability.label}</span>
+                </div>
+              </div>
               <div className="role-presets-pill-grid">
                 {languageOptions.map((lang) => (
                   <button
@@ -350,6 +399,11 @@ export function InterviewSetup({ practiceIntent = null, onStartInterview, onBack
                   </button>
                 ))}
               </div>
+              {voiceCapability.detail && (
+                <div className="voice-capability-subtext" data-testid="voice-capability-subtext">
+                  {voiceCapability.detail}
+                </div>
+              )}
             </div>
           </div>
 
