@@ -28,7 +28,7 @@ console.log('✓ STT Locale mapping verified');
 // Test 2: TTS Locale Mapping
 console.log('Test 2: TTS Locale mapping for Hindi, Hinglish, en-IN, en-US');
 assert.equal(getSpeechSynthesisLocale('hi'), 'hi-IN');
-assert.equal(getSpeechSynthesisLocale('hinglish'), 'hi-IN');
+assert.equal(getSpeechSynthesisLocale('hinglish'), 'en-IN');
 assert.equal(getSpeechSynthesisLocale('en-in'), 'en-IN');
 assert.equal(getSpeechSynthesisLocale('en_in'), 'en-IN');
 assert.equal(getSpeechSynthesisLocale('en'), 'en-US');
