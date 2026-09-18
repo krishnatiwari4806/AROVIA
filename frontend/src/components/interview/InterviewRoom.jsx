@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Mic,
   MicOff,
@@ -29,7 +29,6 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
   const [session, setSession] = useState(null);
   const [currentTurn, setCurrentTurn] = useState(null);
   const [candidateAnswer, setCandidateAnswer] = useState('');
-  const [elapsedDurationSec, setElapsedDurationSec] = useState(0);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
@@ -38,14 +37,22 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
 
   const { speak, cancel, isSpeaking } = useSpeechSynthesis();
 
-  // Stable references to prevent lifecycle cascading loops
+  // Stable references to prevent lifecycle cascading loops and 1s timer rerenders
   const baseTextRef = useRef('');
   const currentTurnIdRef = useRef(currentTurn?.id);
   const cancelRef = useRef(cancel);
+  const turnStartTimeRef = useRef(Date.now());
+  const turnDurationRef = useRef(0);
 
   useEffect(() => {
     currentTurnIdRef.current = currentTurn?.id;
+    turnStartTimeRef.current = Date.now();
+    turnDurationRef.current = 0;
   }, [currentTurn?.id]);
+
+  const handleDurationTick = useCallback((sec) => {
+    turnDurationRef.current = sec;
+  }, []);
 
   const handleTranscript = useCallback((text, transcriptTurnId) => {
     // Phase 6: Guard against stale transcript callbacks belonging to prior turns
@@ -133,7 +140,8 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
       setCurrentTurn(turn);
       setCandidateAnswer('');
       baseTextRef.current = '';
-      setElapsedDurationSec(0);
+      turnStartTimeRef.current = Date.now();
+      turnDurationRef.current = 0;
 
       const sessLang = sess.preferred_language || 'en';
       speakTurnQuestion(turn.question_text, sessLang);
@@ -181,9 +189,13 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
       baseTextRef.current = '';
 
       const answerToSubmit = candidateAnswer.trim() || 'No audible candidate response provided.';
+      const exactDuration = Math.max(
+        1,
+        turnDurationRef.current || Math.round((Date.now() - turnStartTimeRef.current) / 1000)
+      );
       const payload = {
         candidate_answer: answerToSubmit,
-        turn_duration_sec: Math.max(1, elapsedDurationSec || 0),
+        turn_duration_sec: exactDuration,
       };
 
       // Real API Submission with graceful retry reconciliation
@@ -217,7 +229,8 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
               setCurrentTurn(activeTurn);
               setCandidateAnswer('');
               baseTextRef.current = '';
-              setElapsedDurationSec(0);
+              turnStartTimeRef.current = Date.now();
+              turnDurationRef.current = 0;
               setError(null);
 
               speakTurnQuestion(
@@ -255,7 +268,8 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
         setCurrentTurn(nextTurnResult.next_turn);
         setCandidateAnswer('');
         baseTextRef.current = '';
-        setElapsedDurationSec(0);
+        turnStartTimeRef.current = Date.now();
+        turnDurationRef.current = 0;
 
         speakTurnQuestion(
           nextTurnResult.next_turn.question_text,
@@ -288,12 +302,16 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
       // Check if candidate provided a draft answer for the current active turn
       const hasCurrentDraft = candidateAnswer && candidateAnswer.trim().length > 0;
       let answeredCount = currentTurn?.turn_index ?? 0;
+      const exactDuration = Math.max(
+        1,
+        turnDurationRef.current || Math.round((Date.now() - turnStartTimeRef.current) / 1000)
+      );
 
       if (hasCurrentDraft && currentTurn?.id) {
         try {
           await api.submitTurnAnswer(sessionId, currentTurn.id, {
             candidate_answer: candidateAnswer.trim(),
-            turn_duration_sec: Math.max(1, elapsedDurationSec || 0),
+            turn_duration_sec: exactDuration,
           });
           answeredCount += 1;
         } catch (submitErr) {
@@ -482,16 +500,22 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
         <div className="room-center-stage">
           {/* Floating 3D Holographic Crystal */}
           <div className="crystal-stage-container">
-            <CrystalCore isSpeaking={isSpeaking} isListening={isListening} size={150} />
-            <AudioVisualizer isSpeaking={isSpeaking} isListening={isListening} />
+            <CrystalCore isSpeaking={isSpeaking} isListening={isListening} isAnalyzing={submitting} size={150} />
+            <AudioVisualizer isSpeaking={isSpeaking} isListening={isListening} isAnalyzing={submitting} />
           </div>
 
           {/* AI Question Prompt Card */}
-          <div className="ai-question-card">
+          <div className={`ai-question-card ${submitting ? 'analyzing' : ''}`}>
             <div className="question-card-header">
-              <span className="ai-asking-badge">
+              <span className={`ai-asking-badge ${submitting ? 'analyzing' : ''}`}>
                 <Sparkles size={13} />
-                {isSpeaking ? 'AROVIA IS SPEAKING' : isListening ? 'AROVIA IS LISTENING' : 'AROVIA IS ASKING'}
+                {submitting
+                  ? 'INTERVIEWER IS ANALYZING YOUR RESPONSE...'
+                  : isSpeaking
+                  ? 'AROVIA IS SPEAKING'
+                  : isListening
+                  ? 'AROVIA IS LISTENING'
+                  : 'AROVIA IS ASKING'}
               </span>
               <div className="question-tag-pills">
                 {isIntro ? (
@@ -543,8 +567,9 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
           {/* Turn Timer */}
           <div className="room-timer-row">
             <TurnTimer
+              turnId={currentTurn?.id}
               durationLimitSec={currentTurn?.ideal_time_sec || 300}
-              onDurationTick={setElapsedDurationSec}
+              onDurationTick={handleDurationTick}
               isPaused={submitting || isEnding || isCompleted}
             />
           </div>
