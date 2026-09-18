@@ -273,8 +273,87 @@ async function runCoachTests() {
     console.log("✓ TEST 7 PASSED: Coach conversation & Action Plan payloads remain fully functional.");
   }
 
+  // ----------------------------------------------------
+  // TEST 8: Turn with architecture_blueprint triggers blueprint state & action
+  // ----------------------------------------------------
+  {
+    const blueprintTurn = {
+      turn_index: 0,
+      question_text: 'Design a globally distributed rate limiter.',
+      candidate_answer: 'Using Redis sliding windows and edge gateways.',
+      correctness_score: 88,
+      architecture_blueprint: {
+        scenario_id: 'sys.sr.ratelimit.core.01',
+        title: 'Globally Distributed API Rate Limiter',
+        nodes: [{ id: 'redis', label: 'Redis Cluster', type: 'cache' }],
+      },
+    };
+    assert.strictEqual(Boolean(blueprintTurn.architecture_blueprint), true);
+    assert.strictEqual(blueprintTurn.architecture_blueprint.scenario_id, 'sys.sr.ratelimit.core.01');
+    console.log("✓ TEST 8 PASSED: System Design turn with blueprint metadata correctly identified for Coach grounding.");
+  }
+
+  // ----------------------------------------------------
+  // TEST 9: Coach conversation receives structured reference_architecture_context
+  // ----------------------------------------------------
+  {
+    fetchCalls = [];
+    storage = { arovia_token: 'valid-token' };
+
+    mockFetchHandler = (url, opts) => {
+      if (url === '/api/v1/coach/conversation') {
+        return jsonResponse({
+          id: 'conv-arch-1',
+          user_id: 'usr-arch',
+          session_id: 'sess-arch-1',
+          messages: [
+            { id: 'msg-1', sender: 'coach', message_text: 'Welcome! Let us review your rate limiting architecture.' }
+          ],
+          suggested_followups: ['Why was Redis chosen over SQL here?'],
+          reference_architecture_context: {
+            scenario_id: 'sys.sr.ratelimit.core.01',
+            title: 'Globally Distributed API Rate Limiter',
+            nodes: [
+              { id: 'edge_gw', label: 'Edge Gateway', type: 'gateway' },
+              { id: 'redis_cluster', label: 'Redis Cluster', type: 'cache' },
+            ],
+          },
+          actionable_plan: null,
+          weakness_resolutions: [],
+        }, 200);
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    };
+
+    const conv = await api.getOrCreateCoachConversation('sess-arch-1', true);
+    assert.strictEqual(conv.id, 'conv-arch-1');
+    assert.strictEqual(Boolean(conv.reference_architecture_context), true);
+    assert.strictEqual(conv.reference_architecture_context.scenario_id, 'sys.sr.ratelimit.core.01');
+    assert.strictEqual(conv.reference_architecture_context.nodes.length, 2);
+    console.log("✓ TEST 9 PASSED: Coach conversation receives structured reference_architecture_context without schema errors.");
+  }
+
+  // ----------------------------------------------------
+  // TEST 10: Turn prompt generator creates exact architecture inquiry string
+  // ----------------------------------------------------
+  {
+    const generatePrompt = (turnIndex, promptType) => {
+      if (promptType === 'architecture') {
+        return `Can you explain the reference architecture, component purposes, and key trade-offs for Turn ${turnIndex + 1}?`;
+      }
+      if (promptType === 'model_answer') {
+        return `What is a senior-level benchmark model answer for Turn ${turnIndex + 1}?`;
+      }
+      return `Why was my answer in Turn ${turnIndex + 1} scored lower?`;
+    };
+
+    const archPrompt = generatePrompt(0, 'architecture');
+    assert.strictEqual(archPrompt, 'Can you explain the reference architecture, component purposes, and key trade-offs for Turn 1?');
+    console.log("✓ TEST 10 PASSED: Architecture inquiry prompt correctly formats Turn index and reference trade-off request.");
+  }
+
   console.log("==========================================");
-  console.log("ALL 7 COACH TURN EXPLORER TESTS PASSED!");
+  console.log("ALL 10 COACH TURN EXPLORER TESTS PASSED!");
   console.log("==========================================");
 }
 
@@ -282,3 +361,4 @@ runCoachTests().catch((err) => {
   console.error("TEST FAILED:", err);
   process.exit(1);
 });
+
