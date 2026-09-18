@@ -55,10 +55,16 @@ async def get_or_create_coach_conversation(
         session_id=body.session_id,
         auto_debrief=body.auto_debrief,
     )
+    ref_arch = await coach_service.resolve_reference_architecture_for_session(
+        db=db,
+        session_id=body.session_id,
+        user_id=current_user.id,
+    )
     resp = CoachConversationResponse.model_validate(conversation)
     resp.suggested_followups = followups
     resp.actionable_plan = actionable_plan
     resp.weakness_resolutions = weakness_resolutions
+    resp.reference_architecture_context = ref_arch
     return resp
 
 
