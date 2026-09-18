@@ -102,7 +102,7 @@ class BrowserVoiceProvider extends BaseVoiceProvider {
     const utterance = new SpeechSynthesisUtterance(cleanSpeechText);
     this.currentUtterance = utterance;
 
-    utterance.rate = rate ?? voicePrefs.voiceSpeed ?? 1.0;
+    utterance.rate = rate ?? voicePrefs.voiceSpeed ?? 0.93;
     utterance.volume = volume ?? voicePrefs.voiceVolume ?? 1.0;
     utterance.pitch = pitch ?? 1.0;
 
