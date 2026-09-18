@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronUp, MessageSquare, Sparkles, Check, X, Clock } from 'lucide-react';
+import { SystemDesignBlueprint } from './SystemDesignBlueprint';
 
 /**
  * Turn-by-Turn Review Accordions matching Figma Performance Report.
@@ -137,6 +138,15 @@ export function TurnAccordion({ turnsEvaluation = [] }) {
                           </p>
                         )}
                       </div>
+                    )}
+
+                    {/* Educational Senior Reference Architecture Blueprint (System Design turns only) */}
+                    {turn.architecture_blueprint && (
+                      <SystemDesignBlueprint
+                        blueprint={turn.architecture_blueprint}
+                        coveredConcepts={coveredList}
+                        missedConcepts={missedList}
+                      />
                     )}
 
                     {/* Concept Coverage & Filler Words */}
