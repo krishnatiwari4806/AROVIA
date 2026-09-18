@@ -192,7 +192,7 @@ async def start_interview_session(
 ) -> InterviewQuestionTurnResponse:
     """Generate the initial conversational introduction (Turn 0) and start the live interview loop."""
     turn = await interview_service.start_interview(
-        db=db, current_user=current_user, session_id=session_id
+        db=db, current_user=current_user, session_id=session_id, response=response
     )
     session = await interview_service.get_session(
         db=db, current_user=current_user, session_id=session_id
@@ -256,6 +256,7 @@ async def submit_turn_answer(
         session_id=session_id,
         turn_id=turn_id,
         request=body,
+        response=response,
     )
 
 
