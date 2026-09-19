@@ -17,6 +17,7 @@ import { useSpeechRecognition } from '../../hooks/useSpeechRecognition';
 import { TurnTimer } from './TurnTimer';
 import { AudioVisualizer } from './AudioVisualizer';
 import { CrystalCore } from './CrystalCore';
+import { SystemDesignStageStepper } from './SystemDesignStageStepper';
 import { getAroviaSettings } from '../../services/settingsManager';
 
 /**
@@ -457,34 +458,64 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
   const seniorityLabel = session?.seniority_level?.toUpperCase() || 'SENIOR';
   const focusLabel = session?.interview_focus?.toUpperCase() || 'TECHNICAL CORE';
 
+  const isStagedMode = session?.practice_mode === 'system_design_staged';
+  const stagedStageMeta =
+    currentTurn?.system_design_stage ||
+    currentTurn?.evaluation_data?.system_design_stage ||
+    null;
+  const stagedStageIndex = isIntro
+    ? 0
+    : stagedStageMeta?.stage_index !== undefined
+    ? stagedStageMeta.stage_index
+    : typeof currentTurn?.turn_index === 'number'
+    ? currentTurn.turn_index
+    : 1;
+  const stagedStageKey = stagedStageMeta?.stage_key;
+  const stagedStageName = stagedStageMeta?.stage_name;
+  const stagedStageFocus = stagedStageMeta?.stage_focus;
+
   return (
     <div className="arovia-interview-room-layout">
-      {/* Top Header / Progress Bar */}
-      <header className="room-top-header">
-        <div className="header-meta-group">
-          <div className="live-status-pill">
-            <span className="live-pulsing-dot" />
-            <span className="live-status-label">LIVE SESSION</span>
+      {/* Top Header: System Design Stage Stepper or Legacy Progress Bar */}
+      {isStagedMode ? (
+        <SystemDesignStageStepper
+          stageIndex={stagedStageIndex}
+          stageKey={stagedStageKey}
+          stageName={stagedStageName}
+          stageFocus={stagedStageFocus}
+          scenarioTitle={session?.target_role}
+          isComplete={isCompleted}
+          seniorityLevel={session?.seniority_level}
+          isSpeaking={isSpeaking}
+          isListening={isListening}
+        />
+      ) : (
+        <header className="room-top-header">
+          <div className="header-meta-group">
+            <div className="live-status-pill">
+              <span className="live-pulsing-dot" />
+              <span className="live-status-label">LIVE SESSION</span>
+            </div>
+
+            <div className="role-tags-group">
+              <span className="role-title-text">{roleName}</span>
+              <span className="meta-pill">LEVEL: {seniorityLabel}</span>
+              <span className="meta-pill cyan-pill">FOCUS: {focusLabel}</span>
+            </div>
           </div>
 
-          <div className="role-tags-group">
-            <span className="role-title-text">{roleName}</span>
-            <span className="meta-pill">LEVEL: {seniorityLabel}</span>
-            <span className="meta-pill cyan-pill">FOCUS: {focusLabel}</span>
+          <div className="turn-progress-tracker">
+            <div className="tracker-label-row">
+              <span className="tracker-text">
+                {trackerText}
+              </span>
+            </div>
+            <div className="tracker-bar-track">
+              <div className="tracker-bar-fill" style={{ width: `${progressPercent}%` }} />
+            </div>
           </div>
-        </div>
-
-        <div className="turn-progress-tracker">
-          <div className="tracker-label-row">
-            <span className="tracker-text">
-              {trackerText}
-            </span>
-          </div>
-          <div className="tracker-bar-track">
-            <div className="tracker-bar-fill" style={{ width: `${progressPercent}%` }} />
-          </div>
-        </div>
-      </header>
+        </header>
+      )}
 
       {/* Alert / Error Banner if any */}
       {error && (
@@ -520,6 +551,21 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
               <div className="question-tag-pills">
                 {isIntro ? (
                   <span className="tag-pill cyan-pill">Conversational Warm-up</span>
+                ) : isStagedMode ? (
+                  <>
+                    <span className="tag-pill">
+                      Stage {stagedStageIndex || 1}:{' '}
+                      {stagedStageName ||
+                        (stagedStageIndex === 1
+                          ? 'Requirements'
+                          : stagedStageIndex === 2
+                          ? 'Estimation'
+                          : stagedStageIndex === 3
+                          ? 'Architecture'
+                          : 'Failure Defense')}
+                    </span>
+                    <span className="tag-pill cyan-pill">System Design</span>
+                  </>
                 ) : (
                   <>
                     <span className="tag-pill">
