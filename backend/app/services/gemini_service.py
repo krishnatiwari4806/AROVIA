@@ -256,6 +256,64 @@ def get_grounded_fallback_question(
     if plan:
         intent = plan.intent
         topic = plan.topic
+        stage_key = getattr(plan, "stage_key", None)
+
+        # 1. Staged System Design Fallback handling
+        if stage_key or (intent == QuestionIntent.PRACTICAL_SCENARIO and "system design" in (context.interview_focus or "").lower()):
+            clean_topic = topic.split(" - ")[0] if " - " in topic else topic
+            sk = (stage_key or f"stage_{min(4, max(1, stage_index + 1))}").lower()
+
+            if "stage_1" in sk or "requirement" in sk:
+                if lang == "hi":
+                    q_text = f"{clean_topic} ka design shuru karne ke liye, aap iske primary functional requirements, expected traffic scale, aur latency SLAs ko kaise define karenge?"
+                elif lang == "hinglish":
+                    q_text = f"To start designing the {clean_topic}, aap iske core functional requirements, scale expectations, aur latency SLAs ko kaise define karenge?"
+                else:
+                    q_text = f"To begin designing our {clean_topic}, what are the primary functional requirements, expected traffic scale, and latency SLAs you would establish?"
+                return GeneratedQuestion(
+                    question_text=q_text,
+                    ideal_answer=f"Clear definition of {clean_topic} functional scope (core APIs, user actions), non-functional constraints (99.99% availability, p99 latency < 50ms), and scale boundaries.",
+                    primary_concept=plan.primary_concept or f"{clean_topic}: Requirements & Scope",
+                )
+
+            elif "stage_2" in sk or "estimation" in sk:
+                if lang == "hi":
+                    q_text = "In requirements ke basis par, aap read/write QPS, storage capacity, aur core database schema ko kaise estimate aur design karenge?"
+                elif lang == "hinglish":
+                    q_text = "Based on these requirements, aap system ke read/write QPS, storage needs, aur primary database entities ko kaise model karenge?"
+                else:
+                    q_text = "Based on these requirements, how would you estimate the read/write QPS, storage requirements, and structure the primary database entities?"
+                return GeneratedQuestion(
+                    question_text=q_text,
+                    ideal_answer=f"Back-of-the-envelope capacity estimations for {clean_topic} (peak QPS, bandwidth, 5-year storage) and relational/NoSQL data schema with primary access keys.",
+                    primary_concept=plan.primary_concept or f"{clean_topic}: Capacity & Data Modeling",
+                )
+
+            elif "stage_3" in sk or "architecture" in sk:
+                if lang == "hi":
+                    q_text = "Aap high-level system architecture explain kijiye, jisme API gateway, cache, database, aur services ke beech data flow kaise manage hoga?"
+                elif lang == "hinglish":
+                    q_text = "Could you walk through the high-level architecture, showing how API gateway, cache layer, database, aur microservices aapas mein interact karte hain?"
+                else:
+                    q_text = "Could you walk through the high-level system architecture, explaining how the API gateway, caching tier, database, and backend services interact?"
+                return GeneratedQuestion(
+                    question_text=q_text,
+                    ideal_answer=f"End-to-end component decomposition for {clean_topic}, detailing reverse proxy/gateway, stateless application tier, Redis cache, partitioned database, and async queues.",
+                    primary_concept=plan.primary_concept or f"{clean_topic}: End-to-End Architecture",
+                )
+
+            else:  # stage_4 or defense
+                if lang == "hi":
+                    q_text = "Agar primary cache mein sudden outage ya hot-key saturation ho jaye, toh aapka architecture database ko cascading failure se kaise bachayega?"
+                elif lang == "hinglish":
+                    q_text = "If your primary cache experiences a sudden outage ya hot-key saturation, aap cascading database failure ko prevent karne ke liye kya karenge?"
+                else:
+                    q_text = "If the primary cache tier experiences a sudden outage or hot-key saturation, how will your architecture prevent cascading database failure?"
+                return GeneratedQuestion(
+                    question_text=q_text,
+                    ideal_answer=f"Resilience mechanisms for {clean_topic}: circuit breakers, distributed rate limiting, cache fallback with local in-memory cache, read replicas, and graceful degradation.",
+                    primary_concept=plan.primary_concept or f"{clean_topic}: Resilience & Failure Defense",
+                )
 
         if intent == QuestionIntent.RESUME_PROJECT:
             if lang == "hi":
@@ -404,6 +462,9 @@ Generate the first core technical interview question (Core Question 1, following
 ### STRATEGIC GUIDANCE
 {planner_guidance}
 
+### ANTI-DOGMA & SYSTEM DESIGN DIRECTIVE
+For System Design interviews, reference architecture blueprints and scenario outlines are educational anchors and realistic guidelines, NOT dogmatic grading keys. The candidate may propose valid alternative architectural patterns (e.g. token bucket vs sliding window, SQL vs NoSQL, event-driven vs synchronous). Evaluate sound engineering reasoning, trade-offs, and failure handling rather than penalizing divergence from any single reference design.
+
 ### LANGUAGE GUIDELINES
 {language_instructions}
 
@@ -456,6 +517,9 @@ Evaluate the candidate's latest response and determine the next interview turn (
 ### PREVIOUS CONVERSATION
 Recent Turns Transcript:
 {transcript_history}
+
+### ANTI-DOGMA & SYSTEM DESIGN DIRECTIVE
+For System Design interviews, reference architecture blueprints and scenario outlines are educational anchors and realistic guidelines, NOT dogmatic grading keys. The candidate may propose valid alternative architectural patterns (e.g. token bucket vs sliding window, SQL vs NoSQL, event-driven vs synchronous). Evaluate sound engineering reasoning, trade-offs, and failure handling rather than penalizing divergence from any single reference design.
 
 Latest Question Asked:
 {previous_question}
@@ -804,6 +868,11 @@ class GeminiService:
         if self._client is None:
             self._client = genai.Client(api_key=self.api_key)
         return self._client
+
+    @client.setter
+    def client(self, value: Any) -> None:
+        """Explicit client setter for dependency injection and testing."""
+        self._client = value
 
     async def parse_resume(self, raw_text: str) -> ParsedResumeData:
         """Parse raw resume text into structured Pydantic schema using Gemini with bounded retry on transient errors."""
