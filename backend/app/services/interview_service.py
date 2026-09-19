@@ -641,6 +641,7 @@ class InterviewService:
                 context=candidate_context,
                 planned_core_questions=session.planned_core_questions,
                 current_core_index=0,
+                practice_mode=session.practice_mode,
             )
             t_plan_end = time.perf_counter()
             dur_planning = (t_plan_end - t_plan_start) * 1000
@@ -928,6 +929,7 @@ class InterviewService:
             current_core_index=completed_core,
             covered_topics=covered_topics,
             previous_turns=transcript_history,
+            practice_mode=session.practice_mode,
         )
         t_plan_end = time.perf_counter()
         dur_planning = (t_plan_end - t_plan_start) * 1000
