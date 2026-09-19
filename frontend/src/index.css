@@ -6825,6 +6825,360 @@ html.larger-text {
   color: #FFFFFF;
 }
 
+/* ==========================================================================
+   AROVIA Task 10.15 — System Design Staged Mode Premium Stepper & Scenario Header
+   ========================================================================== */
+
+.staged-mode-header-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px;
+  background: var(--bg-surface, #151821);
+  border: 1px solid var(--border, #2A3040);
+  border-radius: var(--radius-lg, 16px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  width: 100%;
+}
+
+.staged-header-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.staged-meta-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.staged-scenario-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.staged-scenario-title {
+  font-size: var(--text-md, 16px);
+  font-weight: var(--weight-bold, 700);
+  color: var(--text-primary, #FFFFFF);
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.staged-meta-right {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.staged-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: var(--radius-full, 9999px);
+  font-size: 11px;
+  font-weight: var(--weight-bold, 700);
+  letter-spacing: 0.5px;
+}
+
+.staged-status-badge.warmup {
+  background: rgba(34, 211, 238, 0.1);
+  border: 1px solid rgba(34, 211, 238, 0.3);
+  color: var(--accent-cyan, #22D3EE);
+}
+
+.staged-status-badge.active-stage {
+  background: rgba(91, 140, 255, 0.12);
+  border: 1px solid rgba(91, 140, 255, 0.35);
+  color: #93C5FD;
+}
+
+.staged-status-badge.completed {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: var(--success, #10B981);
+}
+
+.stage-counter-text {
+  font-size: 11px;
+  font-weight: var(--weight-bold, 700);
+}
+
+/* Stepper Navigation Bar */
+.staged-stepper-nav {
+  width: 100%;
+  margin: 2px 0;
+}
+
+.staged-stepper-list {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  gap: 6px;
+}
+
+.staged-step-item {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.staged-step-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: var(--radius-md, 10px);
+  font-size: var(--text-xs, 12px);
+  font-weight: var(--weight-semibold, 600);
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.step-icon-wrapper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Completed Step */
+.step-completed .staged-step-pill {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: var(--text-primary, #FFFFFF);
+}
+
+.step-completed .step-icon-wrapper {
+  background: rgba(16, 185, 129, 0.2);
+  color: var(--success, #10B981);
+}
+
+.step-icon-check {
+  color: var(--success, #10B981);
+}
+
+/* Active Step */
+.step-active .staged-step-pill {
+  background: rgba(91, 140, 255, 0.16);
+  border: 1px solid rgba(91, 140, 255, 0.5);
+  color: #FFFFFF;
+  box-shadow: 0 0 14px rgba(91, 140, 255, 0.2);
+}
+
+.step-active .step-icon-wrapper {
+  background: var(--primary, #5B8CFF);
+}
+
+.step-active-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #FFFFFF;
+}
+
+/* Upcoming Step */
+.step-upcoming .staged-step-pill {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  color: var(--text-muted, #6B7280);
+}
+
+.step-upcoming .step-icon-wrapper {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary, #9CA3AF);
+  font-size: 11px;
+  font-weight: var(--weight-bold, 700);
+}
+
+.step-index-num {
+  font-size: 11px;
+  font-weight: var(--weight-bold, 700);
+}
+
+.step-label-text {
+  font-size: var(--text-xs, 12px);
+  letter-spacing: 0.2px;
+}
+
+/* Step Connectors */
+.staged-step-connector {
+  flex: 1;
+  height: 2px;
+  background: var(--border, #2A3040);
+  margin: 0 8px;
+  border-radius: 2px;
+  min-width: 12px;
+  transition: background 0.2s ease;
+}
+
+.staged-step-connector.connector-completed {
+  background: rgba(16, 185, 129, 0.45);
+}
+
+.staged-step-connector.connector-active {
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.45), rgba(91, 140, 255, 0.45));
+}
+
+/* Active Stage Focus Guidance Banner */
+.staged-focus-banner {
+  display: flex;
+  align-items: center;
+  padding: 8px 14px;
+  border-radius: var(--radius-md, 8px);
+  background: rgba(28, 33, 46, 0.7);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+}
+
+.staged-focus-banner.completed {
+  background: rgba(16, 185, 129, 0.06);
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+.staged-focus-banner.warmup {
+  background: rgba(34, 211, 238, 0.05);
+  border-color: rgba(34, 211, 238, 0.2);
+}
+
+.staged-focus-label-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.staged-focus-tag {
+  font-size: 10px;
+  font-weight: var(--weight-bold, 700);
+  color: var(--accent-cyan, #22D3EE);
+  padding: 2px 8px;
+  background: rgba(34, 211, 238, 0.1);
+  border: 1px solid rgba(34, 211, 238, 0.25);
+  border-radius: var(--radius-sm, 4px);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.staged-focus-banner.completed .staged-focus-tag {
+  color: var(--success, #10B981);
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+.staged-focus-desc {
+  font-size: 12px;
+  color: var(--text-secondary, #9CA3AF);
+  line-height: 1.4;
+}
+
+/* Responsive Breakpoints for Staged Mode Stepper */
+@media (max-width: 900px) {
+  .staged-scenario-title {
+    max-width: 260px;
+  }
+
+  .staged-step-pill {
+    padding: 5px 10px;
+    font-size: 11px;
+    gap: 6px;
+  }
+}
+
+@media (max-width: 768px) {
+  .staged-header-top-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .staged-stepper-list {
+    overflow-x: auto;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .staged-stepper-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .staged-step-connector {
+    min-width: 8px;
+    margin: 0 4px;
+  }
+}
+
+@media (max-width: 480px) {
+  .staged-mode-header-container {
+    padding: 12px 12px;
+    gap: 8px;
+  }
+
+  .staged-scenario-title {
+    font-size: 13px;
+    max-width: 180px;
+  }
+
+  .staged-step-pill {
+    padding: 4px 8px;
+    font-size: 10px;
+    gap: 5px;
+  }
+
+  .step-icon-wrapper {
+    width: 16px;
+    height: 16px;
+  }
+
+  .step-index-num {
+    font-size: 10px;
+  }
+
+  .staged-focus-banner {
+    padding: 6px 10px;
+  }
+
+  .staged-focus-tag {
+    font-size: 9px;
+    padding: 1px 6px;
+  }
+
+  .staged-focus-desc {
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 360px) {
+  .staged-scenario-title {
+    max-width: 130px;
+  }
+
+  .staged-step-pill {
+    font-size: 9px;
+    padding: 3px 6px;
+  }
+}
+
+
 
 
 
