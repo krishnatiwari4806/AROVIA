@@ -42,6 +42,7 @@ class QuestionPlan(BaseModel):
         ..., description="Benchmark evaluated technical concept."
     )
     stage_index: int = Field(0, description="0-indexed core question sequence number.")
+    stage_key: Optional[str] = Field(None, description="Stage key identifier for staged interviews.")
     is_escalated: bool = Field(False, description="True if question difficulty was escalated for high performer.")
 
 
@@ -57,22 +58,37 @@ class QuestionPlanner:
         covered_topics: Optional[List[str]] = None,
         previous_turns: Optional[List[Dict[str, Any]]] = None,
         average_prior_score: Optional[float] = None,
+        practice_mode: Optional[str] = None,
     ) -> QuestionPlan:
         """Formulate a strategic QuestionPlan for the upcoming core question turn.
         
         Args:
             context: Verified CandidateContext containing resume, JD, and session data.
-            planned_core_questions: Total core questions planned (3 for quick, 6 for full).
+            planned_core_questions: Total core questions planned (3 for quick, 4 for staged system design, 6 for full).
             current_core_index: 0-indexed number of the core question to plan.
             covered_intents: List of previously executed question intents.
             covered_topics: List of previously covered topic titles/skills.
             previous_turns: History of turns for contextual awareness.
             average_prior_score: Optional average score across prior turns.
+            practice_mode: Optional practice mode string (e.g. 'system_design_staged', 'quick', 'full').
         """
         intents_history = [str(i).lower() for i in (covered_intents or [])]
         topics_history = [str(t).lower() for t in (covered_topics or [])]
 
-        # 1. Quick Mode Arc (3 Core Questions)
+        # 1. Staged System Design Arc (4 Sequential Architectural Stages)
+        is_staged = (
+            practice_mode in ("system_design_staged", "PracticeMode.system_design_staged")
+            or (planned_core_questions == 4 and context.interview_focus == "System Design")
+        )
+        if is_staged:
+            return self._plan_system_design_staged_mode(
+                context=context,
+                current_core_index=current_core_index,
+                topics_history=topics_history,
+                previous_turns=previous_turns,
+            )
+
+        # 2. Quick Mode Arc (3 Core Questions)
         if planned_core_questions <= 3:
             return self._plan_quick_mode(
                 context=context,
@@ -81,7 +97,7 @@ class QuestionPlanner:
                 topics_history=topics_history,
             )
 
-        # 2. Full Mode Arc (6 Core Questions)
+        # 3. Full Mode Arc (6 Core Questions)
         return self._plan_full_mode(
             context=context,
             current_core_index=current_core_index,
@@ -89,6 +105,127 @@ class QuestionPlanner:
             topics_history=topics_history,
             previous_turns=previous_turns,
             average_prior_score=average_prior_score,
+        )
+
+    def _plan_system_design_staged_mode(
+        self,
+        context: CandidateContext,
+        current_core_index: int,
+        topics_history: List[str],
+        previous_turns: Optional[List[Dict[str, Any]]] = None,
+    ) -> QuestionPlan:
+        """Formulate stage-aware QuestionPlan for 4-stage System Design practice mode."""
+        from app.services.reference_evaluator import (
+            SYSTEM_DESIGN_BLUEPRINT_CATALOG,
+            resolve_system_design_blueprint,
+        )
+        from app.services.system_design_stage_tracker import (
+            STAGE_1_REQUIREMENTS,
+            STAGE_2_ESTIMATION,
+            STAGE_3_ARCHITECTURE,
+            STAGE_4_DEFENSE,
+            STAGE_DEFINITIONS,
+            SystemDesignStage,
+        )
+
+        # 1. Resolve consistent scenario and blueprint
+        established_scenario = None
+        if previous_turns:
+            for t in previous_turns:
+                t_idx = t.get("turn_index", 0)
+                if t_idx > 0 and t.get("question_text"):
+                    q_text = t.get("question_text", "")
+                    bp_prior = resolve_system_design_blueprint(question_text=q_text)
+                    if bp_prior:
+                        established_scenario = bp_prior.title
+                        break
+
+        bp = None
+        if not established_scenario:
+            context_text = f"{' '.join(context.skills)} {' '.join(context.matched_skills)} {context.jd_experience_summary or ''} {context.target_role}"
+            bp = resolve_system_design_blueprint(question_text=context_text, primary_concept=context.interview_focus)
+            if bp:
+                established_scenario = bp.title
+
+        if not established_scenario:
+            established_scenario = "Distributed Rate Limiter & API Gateway"
+            bp = SYSTEM_DESIGN_BLUEPRINT_CATALOG.get("sys.sr.ratelimit.core.01")
+        elif not bp:
+            bp = resolve_system_design_blueprint(question_text=established_scenario)
+            if not bp:
+                bp = SYSTEM_DESIGN_BLUEPRINT_CATALOG.get("sys.sr.ratelimit.core.01")
+
+        # Map core question index (0..3) to Stage (1..4)
+        stage_idx = min(4, max(1, current_core_index + 1))
+        stage_def = STAGE_DEFINITIONS.get(stage_idx, STAGE_1_REQUIREMENTS)
+
+        if stage_idx == 1:
+            stage_key = SystemDesignStage.REQUIREMENTS.value
+            grounding_snippet = (
+                f"Scenario: {established_scenario}. Requirements Scope: {bp.description if bp else 'High-scale distributed service'}. "
+                f"SLA target: High availability and low latency boundaries."
+            )
+            guidance = (
+                f"Stage 1 ({stage_def.stage_name}): Ask the candidate to define the primary functional requirements, "
+                f"traffic expectations, and latency/availability SLAs for {established_scenario}. "
+                f"Keep question punchy, single-intent, 20-35 words with exactly 1 question mark."
+            )
+            primary_concept = f"{established_scenario}: Scope & Requirements Engineering"
+
+        elif stage_idx == 2:
+            stage_key = SystemDesignStage.ESTIMATION.value
+            scale_desc = "QPS: ~10k-50k write QPS, 100M daily active entities, low-latency key-value lookups."
+            grounding_snippet = (
+                f"Scenario: {established_scenario}. Scale & Capacity: {scale_desc} "
+                f"Entities & Data Model: Primary key-value mapping and access patterns."
+            )
+            guidance = (
+                f"Stage 2 ({stage_def.stage_name}): Ask the candidate to estimate back-of-the-envelope capacity (QPS, storage) "
+                f"or define the core database entity schema and access patterns for {established_scenario}. "
+                f"Build on Stage 1. Keep question punchy, single-intent, 20-35 words with exactly 1 question mark."
+            )
+            primary_concept = f"{established_scenario}: Capacity Estimation & Entity Modeling"
+
+        elif stage_idx == 3:
+            stage_key = SystemDesignStage.ARCHITECTURE.value
+            nodes_desc = ", ".join([n.label for n in (bp.nodes[:4] if bp else [])]) or "API Gateway, Cache Tier, Storage Layer, Worker Services"
+            grounding_snippet = (
+                f"Scenario: {established_scenario}. Component Architecture: {nodes_desc}. "
+                f"Data Flow: End-to-end request routing and persistence."
+            )
+            guidance = (
+                f"Stage 3 ({stage_def.stage_name}): Ask the candidate to walk through the high-level component architecture "
+                f"for {established_scenario}, explaining how API gateway, cache, database, and backend workers coordinate. "
+                f"Build on their previous estimation. Keep question punchy, single-intent, 20-35 words with exactly 1 question mark."
+            )
+            primary_concept = f"{established_scenario}: End-to-End Component Architecture"
+
+        else:  # stage_idx == 4
+            stage_key = SystemDesignStage.DEFENSE.value
+            tradeoff_desc = (
+                bp.failure_considerations[0]
+                if (bp and bp.failure_considerations)
+                else (bp.key_tradeoffs[0] if (bp and bp.key_tradeoffs) else "Cache failure and database saturation under spike")
+            )
+            grounding_snippet = (
+                f"Scenario: {established_scenario}. Failure & Bottlenecks: {tradeoff_desc}. "
+                f"Resilience: Cascading failure prevention, partition tolerance, and load shedding."
+            )
+            guidance = (
+                f"Stage 4 ({stage_def.stage_name}): Provide realistic interviewer pushback on {established_scenario}. "
+                f"Probe how their architecture handles a critical failure mode (e.g. cache outage, hot key saturation, or cascading failure) "
+                f"and how they maintain consistency and availability. Keep question punchy, single-intent, 20-35 words with exactly 1 question mark."
+            )
+            primary_concept = f"{established_scenario}: Resilience & Failure Mode Defense"
+
+        return QuestionPlan(
+            intent=QuestionIntent.PRACTICAL_SCENARIO,
+            topic=f"{established_scenario} - {stage_def.stage_name}",
+            grounding_snippet=grounding_snippet,
+            guidance=guidance,
+            primary_concept=primary_concept,
+            stage_index=stage_idx,
+            stage_key=stage_key,
         )
 
     def _plan_quick_mode(
