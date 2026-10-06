@@ -28,9 +28,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 def create_application() -> FastAPI:
     """Create and configure the FastAPI application instance."""
-    app_title = settings.PROJECT_NAME if settings else "AROVIA API"
-    app_version = settings.VERSION if settings else "1.0.0"
-    api_prefix = settings.API_V1_PREFIX if settings else "/api/v1"
+    if settings is None:
+        raise RuntimeError(
+            "Application settings failed to initialize. Cannot configure CORS middleware without valid settings."
+        )
+
+    app_title = settings.PROJECT_NAME
+    app_version = settings.VERSION
+    api_prefix = settings.API_V1_PREFIX
 
     app = FastAPI(
         title=app_title,
@@ -46,7 +51,7 @@ def create_application() -> FastAPI:
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
     # Configure CORS Middleware
-    allowed_origins = settings.ALLOWED_ORIGINS if settings else ["*"]
+    allowed_origins = settings.ALLOWED_ORIGINS
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
@@ -66,4 +71,8 @@ def create_application() -> FastAPI:
     return app
 
 
-app = create_application()
+try:
+    app = create_application()
+except RuntimeError:
+    app = None  # type: ignore[assignment]
+
