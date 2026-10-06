@@ -65,8 +65,11 @@ export function SystemDesignStageStepper({
   isSpeaking = false,
   isListening = false,
 }) {
-  // Normalize stageIndex safely (0 = warm-up, 1..4 = core stages)
-  const numericIndex = typeof stageIndex === 'number' ? stageIndex : null;
+  // Normalize stageIndex safely (0 = warm-up / pre-stage, 1..4 = core stages)
+  const numericIndex =
+    typeof stageIndex === 'number' && stageIndex >= 0 && stageIndex <= 4
+      ? stageIndex
+      : 0;
   const isWarmup = numericIndex === 0;
 
   // Resolve current active stage definition
@@ -133,7 +136,7 @@ export function SystemDesignStageStepper({
           ) : (
             <div className="staged-status-badge active-stage">
               <span className="stage-counter-text">
-                STAGE {numericIndex || 1} OF 4
+                STAGE {numericIndex} OF 4
               </span>
             </div>
           )}
@@ -152,7 +155,7 @@ export function SystemDesignStageStepper({
               status = 'completed';
             } else if (isWarmup) {
               status = 'upcoming';
-            } else if (numericIndex !== null && numericIndex !== undefined) {
+            } else if (numericIndex >= 1 && numericIndex <= 4) {
               if (stage.index < numericIndex) {
                 status = 'completed';
               } else if (stage.index === numericIndex) {
@@ -160,8 +163,6 @@ export function SystemDesignStageStepper({
               } else {
                 status = 'upcoming';
               }
-            } else if (idx === 0) {
-              status = 'active';
             }
 
             const isActive = status === 'active';

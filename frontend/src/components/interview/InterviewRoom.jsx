@@ -19,6 +19,7 @@ import { AudioVisualizer } from './AudioVisualizer';
 import { CrystalCore } from './CrystalCore';
 import { SystemDesignStageStepper } from './SystemDesignStageStepper';
 import { getAroviaSettings } from '../../services/settingsManager';
+import { EndInterviewConfirmModal } from './EndInterviewConfirmModal';
 
 /**
  * Live Interview Room Component.
@@ -33,6 +34,7 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
+  const [showEndConfirmModal, setShowEndConfirmModal] = useState(false);
   const [error, setError] = useState(null);
   const [isCompleted, setIsCompleted] = useState(false);
 
@@ -285,14 +287,14 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
     }
   };
 
-  // Dedicated End Interview Early Handler
-  const handleEndEarly = async () => {
+  // Dedicated End Interview Early Handlers
+  const handleOpenEndConfirmModal = () => {
     if (isEnding || submitting || isCompleted) return;
+    setShowEndConfirmModal(true);
+  };
 
-    const confirmed = window.confirm(
-      'Are you sure you want to end this interview session early?\n\nIf you have answered questions, an evaluation report will be generated for your responses. If no questions were answered, this session will be cancelled.'
-    );
-    if (!confirmed) return;
+  const handleConfirmEndEarly = async () => {
+    if (isEnding || submitting || isCompleted) return;
 
     try {
       setIsEnding(true);
@@ -341,6 +343,7 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
           // Do NOT generate fake scores or fake reports
           setError(evalErr?.message || 'Failed to generate interview evaluation. Please try again.');
           setIsEnding(false);
+          setShowEndConfirmModal(false);
           return;
         }
       } else {
@@ -355,6 +358,7 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
     } catch (err) {
       setError(err?.message || 'Could not end interview session.');
       setIsEnding(false);
+      setShowEndConfirmModal(false);
     }
   };
 
@@ -465,11 +469,9 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
     null;
   const stagedStageIndex = isIntro
     ? 0
-    : stagedStageMeta?.stage_index !== undefined
+    : typeof stagedStageMeta?.stage_index === 'number'
     ? stagedStageMeta.stage_index
-    : typeof currentTurn?.turn_index === 'number'
-    ? currentTurn.turn_index
-    : 1;
+    : 0;
   const stagedStageKey = stagedStageMeta?.stage_key;
   const stagedStageName = stagedStageMeta?.stage_name;
   const stagedStageFocus = stagedStageMeta?.stage_focus;
@@ -680,7 +682,7 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
               <button
                 type="button"
                 className="end-interview-btn"
-                onClick={handleEndEarly}
+                onClick={handleOpenEndConfirmModal}
                 disabled={isEnding || submitting || isCompleted}
               >
                 {isEnding ? (
@@ -718,6 +720,13 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
           </div>
         </div>
       </div>
+
+      <EndInterviewConfirmModal
+        isOpen={showEndConfirmModal}
+        onClose={() => setShowEndConfirmModal(false)}
+        onConfirm={handleConfirmEndEarly}
+        isEnding={isEnding}
+      />
     </div>
   );
 }

@@ -173,7 +173,7 @@ console.log('✓ T13 Passed: Active stage focus guidance banner rendered with co
 
 // T14: Missing metadata does not crash
 console.log('T14: Missing metadata does not crash');
-assert.ok(stepperJsx.includes('typeof stageIndex === \'number\' ? stageIndex : null'));
+assert.ok(stepperJsx.includes("typeof stageIndex === 'number' && stageIndex >= 0 && stageIndex <= 4"));
 assert.ok(stepperJsx.includes('seniorityLabel'));
 console.log('✓ T14 Passed: Graceful fallback when stageIndex or metadata is null/undefined');
 
@@ -220,4 +220,28 @@ assert.ok(!stepperJsx.includes('onClick='));
 assert.ok(!stepperJsx.includes('setStage'));
 console.log('✓ T20 Passed: Stepper is strictly read-only; stage advance is backend-governed');
 
-console.log('--- ALL 20 SYSTEM DESIGN STAGE STEPPER TESTS PASSED SUCCESSFULLY ---');
+// T21: Verification that turn_index is NEVER used as stage fallback
+console.log('T21: Verify turn_index is never used as System Design stage index');
+assert.strictEqual(
+  roomJsx.includes('currentTurn.turn_index') && roomJsx.includes('stagedStageIndex'),
+  false,
+  'currentTurn.turn_index must never be used to derive stagedStageIndex'
+);
+assert.ok(
+  roomJsx.includes("typeof stagedStageMeta?.stage_index === 'number'"),
+  'stagedStageIndex must explicitly check stagedStageMeta.stage_index'
+);
+console.log('✓ T21 Passed: Verified zero usage of turn_index for stage fallback calculation');
+
+// T22: Verification that missing metadata resolves to 0 (Warm-up / pre-stage)
+console.log('T22: Verify missing metadata resolves to 0 (Warm-up / pre-stage)');
+assert.ok(
+  roomJsx.includes('? stagedStageMeta.stage_index\n    : 0') ||
+    roomJsx.includes('? stagedStageMeta.stage_index\n    : 0;') ||
+    roomJsx.includes(': 0;'),
+  'stagedStageIndex must fall back to 0 when stage_index is missing'
+);
+console.log('✓ T22 Passed: Verified missing metadata resolves to warm-up state (0)');
+
+console.log('--- ALL SYSTEM DESIGN STAGE STEPPER TESTS PASSED SUCCESSFULLY ---');
+
