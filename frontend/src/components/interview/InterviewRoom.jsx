@@ -304,7 +304,7 @@ export function InterviewRoom({ sessionId, onComplete, onRetake, onExit }) {
 
       // Check if candidate provided a draft answer for the current active turn
       const hasCurrentDraft = candidateAnswer && candidateAnswer.trim().length > 0;
-      let answeredCount = currentTurn?.turn_index ?? 0;
+      let answeredCount = 0; // turn_index fallback removed, default to 0
       const exactDuration = Math.max(
         1,
         turnDurationRef.current || Math.round((Date.now() - turnStartTimeRef.current) / 1000)
