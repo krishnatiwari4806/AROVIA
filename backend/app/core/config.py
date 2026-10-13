@@ -38,11 +38,12 @@ class Settings(BaseSettings):
     MAX_RESUME_SIZE_BYTES: int = 5 * 1024 * 1024  # 5 MB
 
     ALLOWED_ORIGINS: list[str] | str = [
+                "https://arovia-frontend.onrender.com",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "http://localhost:5174",
         "http://127.0.0.1:5174",
-    ]
+        ]
 
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
