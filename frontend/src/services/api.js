@@ -3,7 +3,7 @@
  * Includes single-flight transparent access-token refresh and request retry.
  */
 
-const API_BASE = '/api/v1';
+const API_BASE = import.meta?.env?.VITE_API_BASE_URL || process.env.VITE_API_BASE_URL || (import.meta?.env?.PROD ? 'https://arovia-backend.onrender.com/api/v1' : '/api/v1');
 
 let refreshPromise = null;
 
